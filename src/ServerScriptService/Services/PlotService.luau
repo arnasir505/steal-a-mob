@@ -20,6 +20,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
 local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
+local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
 
 local DataService = require(script.Parent.DataService)
 local EconomyService = require(script.Parent.EconomyService)
@@ -95,7 +96,7 @@ local function labelForSlot(data, index, slot, unlockedSlots)
 	end
 	if slot.Type == "Egg" then
 		local left = math.max(0, (slot.HatchEndsAt or 0) - os.time())
-		return itemName(slot.Item) .. " Egg\n" .. Format.Time(left)
+		return Rarities.Get(slot.Item.Rarity).DisplayName .. " " .. itemName(slot.Item) .. " Egg\n" .. Format.Time(left)
 	end
 	return InventoryService.Describe(slot.Item) .. "\n$" .. Format.Number(Formulas.MobIncome(slot.Item)) .. "/s"
 end
@@ -149,12 +150,7 @@ local function refreshSlot(entry, index)
 	-- Подпись
 	if label then
 		label.Text = labelForSlot(data, index, slot, unlockedSlots)
-		local rarityColor
-		if slot and Mobs[slot.Item.MobId] then
-			local rarity = Rarities.Data[Mobs[slot.Item.MobId].Rarity]
-			rarityColor = rarity and rarity.Color
-		end
-		label.TextColor3 = rarityColor or Color3.fromRGB(255, 255, 255)
+		label.TextColor3 = slot and Rarities.Get(slot.Item.Rarity).Color or Color3.fromRGB(255, 255, 255)
 	end
 
 	-- Подсказки
@@ -354,6 +350,14 @@ local function processHatching(player, data, notify)
 			hatched = true
 			if notify then
 				Remotes.Notify(player, "Egg hatched!", InventoryService.Describe(item))
+				-- Редкая мутация — событие для всего сервера
+				local mutation = Mutations.Get(item.Mutation)
+				if mutation.Announce then
+					Remotes.NotifyAll(
+						mutation.DisplayName .. " hatch!",
+						player.DisplayName .. " got a " .. InventoryService.Describe(item)
+					)
+				end
 			end
 		end
 	end

@@ -1,8 +1,9 @@
 -- DataTemplate: как выглядят сохранённые данные нового игрока.
 -- Если позже добавить сюда новое поле, у старых игроков оно появится автоматически.
 --
--- Моб или яйцо хранится так: { MobId = "Chicken", Weight = 1.5, Mutation = "None" }
--- (у яйца мутации нет — она выпадает при вылуплении)
+-- Моб или яйцо хранится так:
+--   { MobId = "Chicken", Rarity = "Rare", Weight = 1.5, Mutation = "None" }
+-- Редкость у каждого предмета своя (у мобов тоже), мутация выпадает при вылуплении.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)

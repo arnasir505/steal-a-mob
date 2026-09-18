@@ -1,11 +1,13 @@
 -- InventoryService: рюкзак игрока — яйца и мобы, которые не стоят на участке.
 --
--- Предмет (item) выглядит так: { MobId = "Chicken", Weight = 1.5, Mutation = "None" }
+-- Предмет (item) выглядит так:
+--   { MobId = "Chicken", Rarity = "Rare", Weight = 1.5, Mutation = "None" }
+-- Редкость у каждого яйца своя: Курица бывает и Common, и Rare.
 -- У яйца мутации нет — она выпадает при вылуплении.
 -- Каждый предмет в рюкзаке лежит под своим номером-строкой: Backpack.Eggs["7"] = item
 --
 -- Как использовать:
---   local id = InventoryService.AddEgg(player, "Chicken", 2.5)
+--   local id = InventoryService.AddEgg(player, "Chicken", "Rare", 2.5)
 --   local item = InventoryService.TakeEgg(player, id)     -- вынуть (например, чтобы поставить в слот)
 --   InventoryService.SellMob(player, id)
 
@@ -16,6 +18,7 @@ local Format = require(ReplicatedStorage.Shared.Format)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
 local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
+local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 
 local DataService = require(script.Parent.DataService)
@@ -45,32 +48,36 @@ local function nextItemId(data)
 end
 
 -- Собирает корректный предмет или возвращает nil, если данные мусорные
-function InventoryService.MakeItem(mobId, weight, mutation)
+function InventoryService.MakeItem(mobId, rarity, weight, mutation)
 	if not Mobs[mobId] then
 		return nil
 	end
 	if type(weight) ~= "number" or weight ~= weight then
 		return nil
 	end
+	if not Rarities.Data[rarity] then
+		rarity = Rarities.Order[1]
+	end
 	if mutation == nil or not Mutations.Data[mutation] then
 		mutation = "None"
 	end
 	return {
 		MobId = mobId,
+		Rarity = rarity,
 		Weight = Formulas.ClampWeight(weight),
 		Mutation = mutation,
 	}
 end
 
--- Имя предмета для сообщений: "Golden Chicken (2.5 kg)"
+-- Имя предмета для сообщений: "Rare Golden Chicken (2.5 kg)"
 function InventoryService.Describe(item)
 	local mob = Mobs[item.MobId]
 	local name = mob and mob.DisplayName or item.MobId
-	local mutation = Mutations.Data[item.Mutation or "None"]
-	if mutation and mutation.DisplayName ~= "" then
+	local mutation = Mutations.Get(item.Mutation)
+	if mutation.DisplayName ~= "" then
 		name = mutation.DisplayName .. " " .. name
 	end
-	return name .. " (" .. Format.Weight(item.Weight) .. ")"
+	return Rarities.Get(item.Rarity).DisplayName .. " " .. name .. " (" .. Format.Weight(item.Weight) .. ")"
 end
 
 local function refresh(player, data)
@@ -136,12 +143,12 @@ function InventoryService.AddMobItem(player, item)
 	return id
 end
 
-function InventoryService.AddEgg(player, mobId, weight)
-	return InventoryService.AddEggItem(player, InventoryService.MakeItem(mobId, weight, "None"))
+function InventoryService.AddEgg(player, mobId, rarity, weight)
+	return InventoryService.AddEggItem(player, InventoryService.MakeItem(mobId, rarity, weight, "None"))
 end
 
-function InventoryService.AddMob(player, mobId, weight, mutation)
-	return InventoryService.AddMobItem(player, InventoryService.MakeItem(mobId, weight, mutation))
+function InventoryService.AddMob(player, mobId, rarity, weight, mutation)
+	return InventoryService.AddMobItem(player, InventoryService.MakeItem(mobId, rarity, weight, mutation))
 end
 
 ---------------------------------------------------------------------

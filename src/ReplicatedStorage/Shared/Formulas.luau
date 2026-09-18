@@ -1,13 +1,16 @@
 -- Formulas: все игровые формулы в одном месте.
 -- Используется и сервером (настоящие расчёты), и клиентом (чтобы показывать цифры в интерфейсе).
 --
--- "item" — это моб или яйцо: { MobId = "Chicken", Weight = 1.5, Mutation = "None" }
+-- "item" — это моб или яйцо:
+--   { MobId = "Chicken", Rarity = "Rare", Weight = 1.5, Mutation = "None" }
+-- Редкость принадлежит предмету, а не мобу: Курица бывает и Common, и Rare.
 
 local Config = script.Parent.Config
 local GameConfig = require(Config.GameConfig)
 local Rarities = require(Config.Rarities)
 local Mutations = require(Config.Mutations)
 local Mobs = require(Config.Mobs)
+local Biomes = require(Config.Biomes)
 
 local W = GameConfig.Weight
 local S = GameConfig.Speed
@@ -61,8 +64,8 @@ function Formulas.MobIncome(item)
 	if not mob then
 		return 0
 	end
-	local rarity = Rarities.Data[mob.Rarity]
-	local mutation = Mutations.Data[item.Mutation or "None"] or Mutations.Data.None
+	local rarity = Rarities.Get(item.Rarity)
+	local mutation = Mutations.Get(item.Mutation)
 	return mob.BaseIncome
 		* rarity.IncomeMult
 		* Formulas.WeightIncomeMultiplier(item.Weight)
@@ -71,11 +74,7 @@ end
 
 -- Время вылупления в секундах. hatchSpeedMult = 2 при геймпассе X2Hatch
 function Formulas.HatchTime(item, hatchSpeedMult)
-	local mob = Mobs[item.MobId]
-	if not mob then
-		return 0
-	end
-	local rarity = Rarities.Data[mob.Rarity]
+	local rarity = Rarities.Get(item.Rarity)
 	local seconds = rarity.HatchTime * (1 + log10(item.Weight) * W.HatchTimePerLog)
 	return seconds / (hatchSpeedMult or 1)
 end
@@ -83,19 +82,73 @@ end
 -- Случайная мутация при вылуплении
 function Formulas.RollMutation(rng)
 	local entries = {}
-	for id, data in pairs(Mutations.Data) do
-		table.insert(entries, { Key = id, Weight = data.Chance })
+	for _, id in ipairs(Mutations.Order) do
+		table.insert(entries, { Key = id, Weight = Mutations.Data[id].Chance })
 	end
 	return Formulas.WeightedPick(entries, rng)
 end
 
--- Случайная редкость яйца при спавне
-function Formulas.RollRarity(rng)
+-- Случайная редкость яйца при спавне.
+-- biomeId необязателен. С ним выпадают только редкости из списка Rarities
+-- этого биома, а их шансы делятся между собой по пропорции.
+function Formulas.RollRarity(rng, biomeId)
+	local biome = biomeId and Biomes.Get(biomeId)
+	local allowed = biome and biome.Rarities
 	local entries = {}
-	for _, id in ipairs(Rarities.Order) do
-		table.insert(entries, { Key = id, Weight = Rarities.Data[id].SpawnWeight })
+	for _, id in ipairs(allowed or Rarities.Order) do
+		local data = Rarities.Data[id]
+		if data then
+			table.insert(entries, { Key = id, Weight = data.SpawnWeight })
+		end
+	end
+	if #entries == 0 then
+		warn("[Formulas] У биома " .. tostring(biomeId) .. " не указаны редкости")
+		return Rarities.Order[1]
 	end
 	return Formulas.WeightedPick(entries, rng)
+end
+
+-- Случайный моб биома. Все мобы биома равноправны, пока не задан SpawnWeight.
+local biomeMobCache = {}
+local function mobsInBiome(biomeId)
+	local cached = biomeMobCache[biomeId]
+	if cached then
+		return cached
+	end
+	local entries = {}
+	for id, mob in pairs(Mobs) do
+		if mob.Biome == biomeId then
+			table.insert(entries, { Key = id, Weight = mob.SpawnWeight or 1 })
+		end
+	end
+	table.sort(entries, function(a, b)
+		return a.Key < b.Key -- одинаковый порядок на всех серверах
+	end)
+	biomeMobCache[biomeId] = entries
+	return entries
+end
+
+function Formulas.RollMobId(rng, biomeId)
+	local entries = mobsInBiome(biomeId)
+	if #entries == 0 then
+		warn("[Formulas] В биоме " .. tostring(biomeId) .. " нет мобов")
+		return nil
+	end
+	return Formulas.WeightedPick(entries, rng)
+end
+
+-- Целое яйцо для спавна в биоме: кто внутри, какой редкости и сколько весит.
+-- Мутации у яйца нет — она выпадает при вылуплении.
+function Formulas.RollEgg(rng, biomeId)
+	local mobId = Formulas.RollMobId(rng, biomeId)
+	if not mobId then
+		return nil
+	end
+	return {
+		MobId = mobId,
+		Rarity = Formulas.RollRarity(rng, biomeId),
+		Weight = Formulas.RollSpawnWeight(rng),
+	}
 end
 
 ---------------------------------------------------------------------

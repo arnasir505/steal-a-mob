@@ -54,4 +54,12 @@ function Remotes.Notify(player, title, text)
 	Remotes.Event("Notify"):FireClient(player, title, text)
 end
 
+-- То же самое, но всем игрокам сервера (редкое яйцо, редкая мутация)
+function Remotes.NotifyAll(title, text)
+	if not IS_SERVER then
+		return
+	end
+	Remotes.Event("Notify"):FireAllClients(title, text)
+end
+
 return Remotes

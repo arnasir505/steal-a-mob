@@ -17,6 +17,7 @@ local Formulas = require(ReplicatedStorage.Shared.Formulas)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
 local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
+local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
 
 local P = GameConfig.Plot
 
@@ -230,9 +231,7 @@ end
 
 -- Временная модель, пока автор не сделал свою
 local function buildTempModel(item, kind)
-	local mob = Mobs[item.MobId]
-	local rarity = mob and Rarities.Data[mob.Rarity]
-	local color = rarity and rarity.Color or Color3.fromRGB(200, 200, 200)
+	local color = Rarities.Get(item.Rarity).Color
 
 	local model = Instance.new("Model")
 	local part
@@ -286,12 +285,20 @@ function PlotBuilder.MakeItemModel(item, kind)
 		warn("[PlotBuilder] Не удалось изменить размер модели " .. tostring(modelName))
 	end
 
+	-- Мутация перекрашивает модель. Если у мутации убрать Color,
+	-- модель останется такой, какой её сделал автор.
+	local mutation = kind == "Mob" and Mutations.Get(item.Mutation) or nil
+
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
 			descendant.CanCollide = false
 			descendant.CanQuery = false
 			descendant.CanTouch = false
+			if mutation and mutation.Color then
+				descendant.Color = mutation.Color
+				descendant.Material = mutation.Material or descendant.Material
+			end
 		end
 	end
 	return model
