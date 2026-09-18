@@ -8,10 +8,11 @@
 --   !egg Cow Rare 500      — яйцо конкретного моба, редкости и веса (в любом порядке)
 --   !mob Chicken Uncommon  — то же самое, но сразу мобом
 --   !rarities              — показать шансы редкостей и мутаций
+--   !sell                  — продать всё из рюкзака (или !sell eggs / !sell mobs)
 --   !bag                   — показать рюкзак
 --   !plot                  — показать участок
 --   !hatch                 — вылупить все яйца на участке прямо сейчас
---   !slots 3               — открыть слоты бесплатно
+--   !slots 3               — поднять уровень участка бесплатно
 --   !data                  — вывести все данные игрока в Output
 --   !wipe                  — сбросить прогресс
 --   !formulas              — вывести примеры формул в Output
@@ -194,15 +195,45 @@ local function printPlot(player)
 	if not data then
 		return
 	end
-	print("--- Plot of " .. player.Name .. " (" .. Formulas.BaseSlots(data.BaseLevel) .. " slots, income $"
-		.. Format.Number(EconomyService.GetIncomePerSecond(player)) .. "/s) ---")
-	for key, slot in pairs(data.Plot.Slots) do
-		local extra = ""
-		if slot.Type == "Egg" then
-			extra = " hatches in " .. Format.Time((slot.HatchEndsAt or 0) - os.time())
-		end
-		print("  slot " .. key .. ": " .. slot.Type .. " " .. InventoryService.Describe(slot.Item) .. extra)
+	local used = 0
+	for _ in pairs(data.Plot.Items) do
+		used = used + 1
 	end
+	print(string.format("--- Plot of %s: %d/%d мест, уровень %d, доход $%s/s ---",
+		player.Name, used, Formulas.BaseSlots(data.BaseLevel), data.BaseLevel,
+		Format.Number(EconomyService.GetIncomePerSecond(player))))
+	for id, placed in pairs(data.Plot.Items) do
+		local extra = ""
+		if placed.Type == "Egg" then
+			extra = " hatches in " .. Format.Time((placed.HatchEndsAt or 0) - os.time())
+		end
+		print(string.format("  #%s %s %s at (%.1f, %.1f)%s",
+			id, placed.Type, InventoryService.Describe(placed.Item), placed.X or 0, placed.Z or 0, extra))
+	end
+end
+
+-- Продаёт содержимое рюкзака: !sell, !sell eggs, !sell mobs
+local function sellBackpack(player, what)
+	local data = DataService.Get(player)
+	if not data then
+		return
+	end
+	local sold = 0
+	if what ~= "mobs" then
+		for id in pairs(table.clone(data.Backpack.Eggs)) do
+			if InventoryService.SellEgg(player, id) then
+				sold = sold + 1
+			end
+		end
+	end
+	if what ~= "eggs" then
+		for id in pairs(table.clone(data.Backpack.Mobs)) do
+			if InventoryService.SellMob(player, id) then
+				sold = sold + 1
+			end
+		end
+	end
+	print("Продано предметов:", sold)
 end
 
 local function hatchAll(player)
@@ -210,9 +241,9 @@ local function hatchAll(player)
 	if not data then
 		return
 	end
-	for key, slot in pairs(data.Plot.Slots) do
-		if slot.Type == "Egg" then
-			PlotService.HatchNow(player, tonumber(key))
+	for id, placed in pairs(data.Plot.Items) do
+		if placed.Type == "Egg" then
+			PlotService.HatchNow(player, id)
 		end
 	end
 end
@@ -241,6 +272,8 @@ local function onChatted(player, message)
 		printBackpack(player)
 	elseif command == "rarities" then
 		printRarities()
+	elseif command == "sell" then
+		sellBackpack(player, words[2] and string.lower(words[2]) or nil)
 	elseif command == "bag" then
 		printBackpack(player)
 	elseif command == "plot" then
@@ -251,11 +284,10 @@ local function onChatted(player, message)
 	elseif command == "slots" then
 		local data = DataService.Get(player)
 		if data then
-			local add = number or 1
-			data.BaseLevel = math.min(GameConfig.Base.MaxSlots - GameConfig.Base.StartSlots, data.BaseLevel + add)
+			data.BaseLevel = math.clamp(data.BaseLevel + (number or 1), 0, Formulas.MaxBaseLevel())
 			player:SetAttribute("Slots", Formulas.BaseSlots(data.BaseLevel))
 			PlotService.RefreshPlot(player)
-			print("Slots:", Formulas.BaseSlots(data.BaseLevel))
+			print("Уровень участка:", data.BaseLevel, "мест:", Formulas.BaseSlots(data.BaseLevel))
 		end
 	elseif command == "data" then
 		print(HttpService:JSONEncode(DataService.Get(player)))

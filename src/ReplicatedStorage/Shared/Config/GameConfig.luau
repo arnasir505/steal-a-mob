@@ -47,11 +47,14 @@ GameConfig.Treadmill = {
 }
 
 -- Участок (база)
+-- Участок улучшается целиком: одно улучшение даёт сразу несколько слотов
+-- и делает забор красивее.
 GameConfig.Base = {
-	StartSlots = 1,
-	MaxSlots = 20,
+	StartSlots = 2,          -- сколько мест на участке в самом начале
+	SlotsPerLevel = 2,       -- сколько мест добавляет одно улучшение
+	MaxSlots = 40,           -- предел
 	UpgradeBaseCost = 500,
-	UpgradeCostGrowth = 2.5,
+	UpgradeCostGrowth = 2.2, -- каждое следующее улучшение дороже в 2.2 раза
 }
 
 -- Рюкзак
@@ -91,16 +94,28 @@ GameConfig.Daily = {
 	ResetHourUTC = 0, -- новый день начинается в 00:00 UTC
 }
 
--- Участок: где строить временные участки, пока автор не сделал модели,
--- и как часто начислять доход
+-- Участок: размеры временного участка и правила расстановки.
+-- Слот — это вместимость участка, а не плитка на земле: яйцо можно поставить
+-- в любом свободном месте внутри забора.
 GameConfig.Plot = {
-	TempCount = 12,                    -- сколько временных участков создать (не меньше, чем игроков на сервере)
+	TempCount = 12,                       -- сколько временных участков создать
 	TempOrigin = Vector3.new(0, 5, -150), -- центр ряда временных участков (выше Baseplate)
-	TempSpacing = 70,                  -- расстояние между временными участками
-	SlotsPerRow = 5,                   -- сетка слотов: сколько слотов в ряду
-	SlotSpacing = 8,                   -- расстояние между слотами
-	SlotSize = 6,                      -- размер квадрата слота
-	TickInterval = 1,                  -- как часто начислять доход и обновлять таймеры
+	TempSpacing = 70,                     -- расстояние между временными участками
+	TempFloorSize = Vector3.new(44, 1, 44), -- размер пола временного участка
+	PlaceMargin = 3,                      -- насколько близко к забору можно ставить
+	PlaceMinDistance = 6,                  -- минимальное расстояние между предметами
+	PlaceCooldown = 0.25,                 -- защита от спама кнопкой "поставить"
+	TickInterval = 1,                     -- как часто начислять доход и обновлять таймеры
+}
+
+-- Как выглядит забор на разных уровнях участка.
+-- MinLevel — с какого уровня улучшения действует этот вид.
+-- Если сделаешь свои модели заборов, эта таблица не используется (см. PlotBuilder).
+GameConfig.Plot.FenceStyles = {
+	{ MinLevel = 0,  Height = 3, Color = Color3.fromRGB(120, 85, 50),   Material = Enum.Material.WoodPlanks },
+	{ MinLevel = 3,  Height = 4, Color = Color3.fromRGB(150, 155, 165), Material = Enum.Material.Metal },
+	{ MinLevel = 7,  Height = 5, Color = Color3.fromRGB(225, 180, 60),  Material = Enum.Material.Metal },
+	{ MinLevel = 12, Height = 6, Color = Color3.fromRGB(120, 230, 255), Material = Enum.Material.Neon },
 }
 
 -- Продажа мобов и яиц

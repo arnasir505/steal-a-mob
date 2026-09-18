@@ -112,9 +112,9 @@ end
 -- Доход от мобов на участке без геймпассов и бонуса друзей
 function EconomyService.CalculateBaseIncome(data)
 	local total = 0
-	for _, slot in pairs(data.Plot.Slots) do
-		if slot.Type == "Mob" then
-			total = total + Formulas.MobIncome(slot.Item)
+	for _, placed in pairs(data.Plot.Items) do
+		if placed.Type == "Mob" then
+			total = total + Formulas.MobIncome(placed.Item)
 		end
 	end
 	return total

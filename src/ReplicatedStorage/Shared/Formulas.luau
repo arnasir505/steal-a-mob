@@ -195,8 +195,14 @@ function Formulas.TreadmillUpgradeCost(level)
 	return math.floor(T.UpgradeBaseCost * T.UpgradeCostGrowth ^ level)
 end
 
+-- Сколько мест на участке при данном уровне улучшения
 function Formulas.BaseSlots(level)
-	return math.min(B.MaxSlots, B.StartSlots + level)
+	return math.min(B.MaxSlots, B.StartSlots + level * B.SlotsPerLevel)
+end
+
+-- Максимальный уровень улучшения: дальше слоты уже не добавляются
+function Formulas.MaxBaseLevel()
+	return math.ceil((B.MaxSlots - B.StartSlots) / B.SlotsPerLevel)
 end
 
 function Formulas.BaseUpgradeCost(level)

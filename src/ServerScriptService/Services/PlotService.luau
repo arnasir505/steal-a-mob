@@ -1,15 +1,23 @@
 -- PlotService: участки игроков.
 --
--- Что делает:
---  * выдаёт свободный участок при входе и освобождает при выходе;
---  * показывает яйца и мобов на слотах;
---  * вылупляет яйца (в том числе пока игрок был офлайн — время хранится как дата конца);
---  * считает доход в секунду и начисляет деньги;
---  * позволяет убрать предмет в рюкзак, продать его и открыть новый слот за деньги.
+-- Как устроен участок:
+--  * участок огорожен забором, внутри — свободное место;
+--  * яйцо или моба можно поставить В ЛЮБОЕ свободное место внутри забора;
+--  * "слоты" — это вместимость участка, а не плитки на земле;
+--  * улучшение участка покупается целиком: даёт сразу несколько мест
+--    и делает забор красивее.
 --
--- Управление пока через ProximityPrompt на слоте (настоящий интерфейс — этап 11):
---   E — поставить яйцо из рюкзака / убрать предмет в рюкзак / открыть слот
---   F — продать предмет со слота
+-- Что делает сервис:
+--  * выдаёт свободный участок при входе и освобождает при выходе;
+--  * ставит, убирает и продаёт яйца и мобов;
+--  * вылупляет яйца (в том числе пока игрок был офлайн — время хранится как дата конца);
+--  * считает доход в секунду и начисляет деньги.
+--
+-- Управление (настоящий интерфейс будет на этапе 11):
+--   E на свободном месте участка — поставить яйцо из рюкзака
+--   E у предмета — убрать его в рюкзак
+--   F у предмета — продать
+--   E у тумбы улучшения — расширить участок
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -32,29 +40,24 @@ local PlotService = {}
 
 local rng = Random.new()
 
-local plots = {}    -- список участков: { Model, SlotParts, Owner, Prompts, Labels, Original }
-local byPlayer = {} -- [player] = участок
-
-local LOCKED_COLOR = Color3.fromRGB(60, 60, 65)
+local plots = {}      -- список участков
+local byPlayer = {}   -- [player] = участок
+local lastPlaceAt = {} -- [player] = время последней постановки
 
 ---------------------------------------------------------------------
--- Мелкие помощники
+-- Данные участка
 ---------------------------------------------------------------------
 
-local function slotKey(index)
-	return tostring(index)
+local function capacity(data)
+	return Formulas.BaseSlots(data.BaseLevel)
 end
 
-local function getSlot(data, index)
-	return data.Plot.Slots[slotKey(index)]
-end
-
-local function setSlot(data, index, value)
-	data.Plot.Slots[slotKey(index)] = value
-end
-
-local function hatchMultiplier(player)
-	return PassService.Has(player, "X2Hatch") and 2 or 1
+local function countItems(data)
+	local n = 0
+	for _ in pairs(data.Plot.Items) do
+		n = n + 1
+	end
+	return n
 end
 
 local function itemName(item)
@@ -62,18 +65,42 @@ local function itemName(item)
 	return mob and mob.DisplayName or item.MobId
 end
 
+local function hatchMultiplier(player)
+	return PassService.Has(player, "X2Hatch") and 2 or 1
+end
+
+-- Старые сохранения: раньше предметы стояли на плитках Slot1..SlotN.
+-- Переносим их на свободные места, чтобы прогресс не пропал.
+local function migrateOldSlots(data)
+	local old = data.Plot.Slots
+	if type(old) ~= "table" or next(old) == nil then
+		data.Plot.Slots = nil
+		return
+	end
+	local index = 0
+	for _, slot in pairs(old) do
+		local id = tostring(data.NextItemId or 1)
+		data.NextItemId = (data.NextItemId or 1) + 1
+		slot.X = -12 + (index % 5) * 6
+		slot.Z = -12 + math.floor(index / 5) * 6
+		slot.R = 0
+		data.Plot.Items[id] = slot
+		index = index + 1
+	end
+	data.Plot.Slots = nil
+	warn("[PlotService] Старые слоты перенесены на свободные места: " .. index .. " шт.")
+end
+
 ---------------------------------------------------------------------
 -- Доход
 ---------------------------------------------------------------------
 
--- Пересчитывает доход в секунду и показывает его игроку
 local function recalcIncome(player)
 	local data = DataService.Get(player)
 	if not data then
 		return 0
 	end
-	local base = EconomyService.CalculateBaseIncome(data)
-	local income = base * EconomyService.GetMoneyMultiplier(player)
+	local income = EconomyService.CalculateBaseIncome(data) * EconomyService.GetMoneyMultiplier(player)
 	EconomyService.SetIncomePerSecond(player, income)
 	return income
 end
@@ -81,191 +108,285 @@ end
 PlotService.RecalcIncome = recalcIncome
 
 ---------------------------------------------------------------------
--- Показ слота
+-- Показ предметов
 ---------------------------------------------------------------------
 
-local function labelForSlot(data, index, slot, unlockedSlots)
-	if index > unlockedSlots then
-		if index == unlockedSlots + 1 and unlockedSlots < GameConfig.Base.MaxSlots then
-			return "Unlock: $" .. Format.Number(Formulas.BaseUpgradeCost(data.BaseLevel))
-		end
-		return "Locked"
+local function labelFor(placed)
+	if placed.Type == "Egg" then
+		local left = math.max(0, (placed.HatchEndsAt or 0) - os.time())
+		return Rarities.Get(placed.Item.Rarity).DisplayName .. " " .. itemName(placed.Item) .. " Egg\n" .. Format.Time(left)
 	end
-	if not slot then
-		return "Empty"
-	end
-	if slot.Type == "Egg" then
-		local left = math.max(0, (slot.HatchEndsAt or 0) - os.time())
-		return Rarities.Get(slot.Item.Rarity).DisplayName .. " " .. itemName(slot.Item) .. " Egg\n" .. Format.Time(left)
-	end
-	return InventoryService.Describe(slot.Item) .. "\n$" .. Format.Number(Formulas.MobIncome(slot.Item)) .. "/s"
+	return InventoryService.Describe(placed.Item) .. "\n$" .. Format.Number(Formulas.MobIncome(placed.Item)) .. "/s"
 end
 
--- Перерисовывает один слот: модель, подписи и подсказки
-local function refreshSlot(entry, index)
-	local slotPart = entry.SlotParts[index]
-	if not slotPart then
+local function clearItemVisual(entry, id)
+	local model = entry.Models[id]
+	if model then
+		model:Destroy()
+	end
+	entry.Models[id] = nil
+	entry.Labels[id] = nil
+end
+
+-- Создаёт модель предмета на участке вместе с подсказками
+local function renderItem(entry, id, placed)
+	clearItemVisual(entry, id)
+
+	local model = PlotBuilder.MakeItemModel(placed.Item, placed.Type)
+	if not model then
 		return
 	end
-	local player = entry.Owner
-	local data = player and DataService.Get(player)
-	local label = entry.Labels[index]
-	local mainPrompt = entry.Prompts[index] and entry.Prompts[index].Main
-	local sellPrompt = entry.Prompts[index] and entry.Prompts[index].Sell
+	model.Name = id
+	PlotBuilder.PlaceModel(model, entry.Floor, placed.X or 0, placed.Z or 0, placed.R or 0)
+	model.Parent = entry.Placed
 
-	if not data then
-		PlotBuilder.ClearSlot(slotPart)
-		if label then
-			label.Text = ""
-		end
-		return
-	end
-
-	local unlockedSlots = Formulas.BaseSlots(data.BaseLevel)
-	local slot = getSlot(data, index)
-	local locked = index > unlockedSlots
-
-	-- Закрытые слоты выглядят тёмными
-	local original = entry.Original[slotPart]
-	if original then
-		slotPart.Color = locked and LOCKED_COLOR or original.Color
-		slotPart.Transparency = locked and 0.5 or original.Transparency
-	end
-
-	-- Модель на слоте
-	if locked or not slot then
-		PlotBuilder.ClearSlot(slotPart)
-	else
-		local current = slotPart:FindFirstChild("Display")
-		local signature = slot.Type .. "|" .. slot.Item.MobId .. "|" .. tostring(slot.Item.Weight) .. "|" .. tostring(slot.Item.Mutation)
-		if not current or current:GetAttribute("Signature") ~= signature then
-			local model = PlotBuilder.MakeItemModel(slot.Item, slot.Type)
-			if model then
-				model:SetAttribute("Signature", signature)
-				PlotBuilder.ShowOnSlot(slotPart, model)
-			end
-		end
-	end
-
-	-- Подпись
+	local label = PlotBuilder.EnsureItemLabel(model)
 	if label then
-		label.Text = labelForSlot(data, index, slot, unlockedSlots)
-		label.TextColor3 = slot and Rarities.Get(slot.Item.Rarity).Color or Color3.fromRGB(255, 255, 255)
+		label.Text = labelFor(placed)
+		label.TextColor3 = Rarities.Get(placed.Item.Rarity).Color
 	end
 
-	-- Подсказки
-	if mainPrompt then
-		if locked then
-			local isNext = index == unlockedSlots + 1 and unlockedSlots < GameConfig.Base.MaxSlots
-			mainPrompt.Enabled = isNext
-			mainPrompt.ActionText = "Unlock"
-			mainPrompt.ObjectText = isNext and ("$" .. Format.Number(Formulas.BaseUpgradeCost(data.BaseLevel))) or "Locked"
-		elseif slot then
-			mainPrompt.Enabled = true
-			mainPrompt.ActionText = "Store"
-			mainPrompt.ObjectText = itemName(slot.Item) .. (slot.Type == "Egg" and " Egg" or "")
-		else
-			mainPrompt.Enabled = true
-			mainPrompt.ActionText = "Place"
-			mainPrompt.ObjectText = "Empty slot"
-		end
-	end
+	local anchor = model.PrimaryPart
+	local store = Instance.new("ProximityPrompt")
+	store.Name = "StorePrompt"
+	store.ActionText = "Store"
+	store.ObjectText = itemName(placed.Item) .. (placed.Type == "Egg" and " Egg" or "")
+	store.KeyboardKeyCode = Enum.KeyCode.E
+	store.GamepadKeyCode = Enum.KeyCode.ButtonX
+	store.RequiresLineOfSight = false
+	store.MaxActivationDistance = 5
+	store.Parent = anchor
+	store.Triggered:Connect(function(player)
+		PlotService.Store(player, id, entry)
+	end)
 
-	if sellPrompt then
-		if slot and not locked then
-			local price = slot.Type == "Egg" and Formulas.EggSellPrice(slot.Item) or Formulas.MobSellPrice(slot.Item)
-			sellPrompt.Enabled = true
-			sellPrompt.ActionText = "Sell"
-			sellPrompt.ObjectText = "$" .. Format.Number(price)
-		else
-			sellPrompt.Enabled = false
-		end
+	local price = placed.Type == "Egg" and Formulas.EggSellPrice(placed.Item) or Formulas.MobSellPrice(placed.Item)
+	local sell = Instance.new("ProximityPrompt")
+	sell.Name = "SellPrompt"
+	sell.ActionText = "Sell"
+	sell.ObjectText = "$" .. Format.Number(price)
+	sell.KeyboardKeyCode = Enum.KeyCode.F
+	sell.GamepadKeyCode = Enum.KeyCode.ButtonY
+	sell.RequiresLineOfSight = false
+	sell.MaxActivationDistance = 5
+	sell.UIOffset = Vector2.new(0, 60)
+	sell.Parent = anchor
+	sell.Triggered:Connect(function(player)
+		PlotService.Sell(player, id, entry)
+	end)
+
+	entry.Models[id] = model
+	entry.Labels[id] = label
+end
+
+local function updateSign(entry, data)
+	local used, total = countItems(data), capacity(data)
+	PlotBuilder.SetSignText(entry.Model, entry.Owner.DisplayName .. "'s Base\n" .. used .. " / " .. total)
+
+	local maxLevel = Formulas.MaxBaseLevel()
+	if data.BaseLevel >= maxLevel then
+		PlotBuilder.SetUpgradeText(entry.Model, "Base fully upgraded")
+	else
+		local cost = Formulas.BaseUpgradeCost(data.BaseLevel)
+		PlotBuilder.SetUpgradeText(entry.Model, "Upgrade Base\n$" .. Format.Number(cost)
+			.. "  (+" .. GameConfig.Base.SlotsPerLevel .. " slots)")
+	end
+	if entry.UpgradePrompt then
+		entry.UpgradePrompt.Enabled = data.BaseLevel < maxLevel
+		entry.UpgradePrompt.ObjectText = data.BaseLevel < maxLevel
+			and ("$" .. Format.Number(Formulas.BaseUpgradeCost(data.BaseLevel)))
+			or "Max level"
 	end
 end
 
-local function refreshAllSlots(entry)
-	for index in pairs(entry.SlotParts) do
-		refreshSlot(entry, index)
+local function renderPlot(entry)
+	local data = entry.Owner and DataService.Get(entry.Owner)
+	for id in pairs(entry.Models) do
+		clearItemVisual(entry, id)
 	end
+	if not data then
+		return
+	end
+	for id, placed in pairs(data.Plot.Items) do
+		renderItem(entry, id, placed)
+	end
+	PlotBuilder.UpdateFence(entry.Model, data.BaseLevel)
+	updateSign(entry, data)
 end
 
 PlotService.RefreshPlot = function(player)
 	local entry = byPlayer[player]
 	if entry then
-		refreshAllSlots(entry)
+		renderPlot(entry)
 	end
 end
 
 ---------------------------------------------------------------------
--- Действия игрока
+-- Поставить предмет
 ---------------------------------------------------------------------
 
--- Ставит предмет из рюкзака в пустой слот.
--- Пока нет интерфейса выбора — берём самое старое яйцо, а если яиц нет, то моба.
-local function placeFromBackpack(player, entry, data, index)
+-- Свободно ли место: рядом не должно быть другого предмета
+local function isSpotFree(data, x, z)
+	local minDistance = GameConfig.Plot.PlaceMinDistance
+	for _, placed in pairs(data.Plot.Items) do
+		local dx, dz = (placed.X or 0) - x, (placed.Z or 0) - z
+		if dx * dx + dz * dz < minDistance * minDistance then
+			return false
+		end
+	end
+	return true
+end
+
+-- Игрок нажал кнопку "поставить". Позицию берём с сервера, клиенту не верим.
+function PlotService.PlaceFromBackpack(player)
+	local entry = byPlayer[player]
+	local data = DataService.Get(player)
+	if not entry or not data then
+		return
+	end
+
+	local now = os.clock()
+	if now - (lastPlaceAt[player] or 0) < GameConfig.Plot.PlaceCooldown then
+		return
+	end
+	lastPlaceAt[player] = now
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+
+	if countItems(data) >= capacity(data) then
+		Remotes.Notify(player, "Base is full", "Upgrade your base for more space.")
+		return
+	end
+
+	local x, z = PlotBuilder.ToLocal(entry.Floor, root.Position)
+	if not PlotBuilder.IsInside(entry.Floor, x, z) then
+		Remotes.Notify(player, "Not your base", "Stand inside your own fence to place eggs.")
+		return
+	end
+	if not isSpotFree(data, x, z) then
+		Remotes.Notify(player, "Too close", "There is something here already.")
+		return
+	end
+
+	-- Пока нет интерфейса выбора: берём самое старое яйцо, а если яиц нет — моба
+	local kind, item = "Egg", nil
 	local eggId = InventoryService.OldestEggId(player)
 	if eggId then
-		local item = InventoryService.TakeEgg(player, eggId)
-		if not item then
-			return
+		item = InventoryService.TakeEgg(player, eggId)
+	else
+		local mobId = InventoryService.OldestMobId(player)
+		if mobId then
+			kind = "Mob"
+			item = InventoryService.TakeMob(player, mobId)
 		end
-		-- Если яйцо уже лежало в слоте и его убрали, оно продолжает с того же места
+	end
+	if not item then
+		Remotes.Notify(player, "Backpack empty", "Steal an egg from a biome first.")
+		return
+	end
+
+	-- Модель смотрит туда же, куда смотрел игрок
+	local look = entry.Floor.CFrame:VectorToObjectSpace(root.CFrame.LookVector)
+	local yaw = math.atan2(-look.X, -look.Z)
+
+	local placed = { Type = kind, Item = item, X = x, Z = z, R = yaw }
+	if kind == "Egg" then
 		local seconds = item.HatchLeft or Formulas.HatchTime(item, hatchMultiplier(player))
 		item.HatchLeft = nil
-		setSlot(data, index, {
-			Type = "Egg",
-			Item = item,
-			HatchEndsAt = os.time() + math.max(1, math.floor(seconds)),
-		})
+		placed.HatchEndsAt = os.time() + math.max(1, math.floor(seconds))
 		Remotes.Notify(player, "Egg placed", itemName(item) .. " Egg — " .. Format.Time(seconds))
-		refreshSlot(entry, index)
-		return
 	end
 
-	local mobId = InventoryService.OldestMobId(player)
-	if mobId then
-		local item = InventoryService.TakeMob(player, mobId)
-		if not item then
-			return
-		end
-		setSlot(data, index, { Type = "Mob", Item = item })
-		refreshSlot(entry, index)
-		recalcIncome(player)
-		return
-	end
-
-	Remotes.Notify(player, "Backpack empty", "Steal an egg from a biome first.")
+	local id = InventoryService.NextId(player)
+	data.Plot.Items[id] = placed
+	renderItem(entry, id, placed)
+	updateSign(entry, data)
+	recalcIncome(player)
 end
 
--- Убирает предмет со слота обратно в рюкзак
-local function storeToBackpack(player, entry, data, index, slot)
-	if slot.Type == "Egg" then
+---------------------------------------------------------------------
+-- Убрать и продать
+---------------------------------------------------------------------
+
+-- atEntry — участок, у которого нажали подсказку. Чужой участок трогать нельзя.
+function PlotService.Store(player, id, atEntry)
+	local entry = byPlayer[player]
+	local data = DataService.Get(player)
+	if not entry or not data then
+		return
+	end
+	if atEntry and atEntry ~= entry then
+		Remotes.Notify(player, "Not your base", "This base belongs to someone else.")
+		return
+	end
+	local placed = data.Plot.Items[id]
+	if not placed then
+		return
+	end
+
+	if placed.Type == "Egg" then
 		if not InventoryService.HasEggSpace(player) then
 			return
 		end
 		-- Яйцо в рюкзаке не растёт: запоминаем, сколько осталось до вылупления
-		local item = slot.Item
-		item.HatchLeft = math.max(0, (slot.HatchEndsAt or 0) - os.time())
-		if not InventoryService.AddEggItem(player, item) then
+		placed.Item.HatchLeft = math.max(0, (placed.HatchEndsAt or 0) - os.time())
+		if not InventoryService.AddEggItem(player, placed.Item) then
 			return
 		end
 	else
 		if not InventoryService.HasMobSpace(player) then
 			return
 		end
-		if not InventoryService.AddMobItem(player, slot.Item) then
+		if not InventoryService.AddMobItem(player, placed.Item) then
 			return
 		end
 	end
-	setSlot(data, index, nil)
-	refreshSlot(entry, index)
+
+	data.Plot.Items[id] = nil
+	clearItemVisual(entry, id)
+	updateSign(entry, data)
 	recalcIncome(player)
 end
 
-local function unlockSlot(player, entry, data)
-	local unlockedSlots = Formulas.BaseSlots(data.BaseLevel)
-	if unlockedSlots >= GameConfig.Base.MaxSlots then
-		Remotes.Notify(player, "Max base", "All slots are unlocked.")
+function PlotService.Sell(player, id, atEntry)
+	local entry = byPlayer[player]
+	local data = DataService.Get(player)
+	if not entry or not data then
+		return
+	end
+	if atEntry and atEntry ~= entry then
+		Remotes.Notify(player, "Not your base", "This base belongs to someone else.")
+		return
+	end
+	local placed = data.Plot.Items[id]
+	if not placed then
+		return
+	end
+	local price = placed.Type == "Egg" and Formulas.EggSellPrice(placed.Item) or Formulas.MobSellPrice(placed.Item)
+	data.Plot.Items[id] = nil
+	clearItemVisual(entry, id)
+	EconomyService.AddMoney(player, price)
+	Remotes.Notify(player, "Sold", InventoryService.Describe(placed.Item) .. " for $" .. Format.Number(price))
+	updateSign(entry, data)
+	recalcIncome(player)
+end
+
+---------------------------------------------------------------------
+-- Улучшение участка
+---------------------------------------------------------------------
+
+function PlotService.Upgrade(player)
+	local entry = byPlayer[player]
+	local data = DataService.Get(player)
+	if not entry or not data then
+		return
+	end
+	if data.BaseLevel >= Formulas.MaxBaseLevel() then
+		Remotes.Notify(player, "Max base", "Your base is fully upgraded.")
 		return
 	end
 	local cost = Formulas.BaseUpgradeCost(data.BaseLevel)
@@ -274,67 +395,22 @@ local function unlockSlot(player, entry, data)
 		return
 	end
 	data.BaseLevel = data.BaseLevel + 1
-	player:SetAttribute("Slots", Formulas.BaseSlots(data.BaseLevel))
-	Remotes.Notify(player, "Slot unlocked", "Now " .. Formulas.BaseSlots(data.BaseLevel) .. " slots.")
-	refreshAllSlots(entry)
-end
-
-local function onMainPrompt(player, entry, index)
-	if entry.Owner ~= player then
-		Remotes.Notify(player, "Not your plot", "This base belongs to someone else.")
-		return
-	end
-	local data = DataService.Get(player)
-	if not data then
-		return
-	end
-	local unlockedSlots = Formulas.BaseSlots(data.BaseLevel)
-	if index > unlockedSlots then
-		if index == unlockedSlots + 1 then
-			unlockSlot(player, entry, data)
-		end
-		return
-	end
-	local slot = getSlot(data, index)
-	if slot then
-		storeToBackpack(player, entry, data, index, slot)
-	else
-		placeFromBackpack(player, entry, data, index)
-	end
-end
-
-local function onSellPrompt(player, entry, index)
-	if entry.Owner ~= player then
-		return
-	end
-	local data = DataService.Get(player)
-	if not data then
-		return
-	end
-	if index > Formulas.BaseSlots(data.BaseLevel) then
-		return
-	end
-	local slot = getSlot(data, index)
-	if not slot then
-		return
-	end
-	local price = slot.Type == "Egg" and Formulas.EggSellPrice(slot.Item) or Formulas.MobSellPrice(slot.Item)
-	setSlot(data, index, nil)
-	EconomyService.AddMoney(player, price)
-	Remotes.Notify(player, "Sold", InventoryService.Describe(slot.Item) .. " for $" .. Format.Number(price))
-	refreshSlot(entry, index)
-	recalcIncome(player)
+	player:SetAttribute("Slots", capacity(data))
+	PlotBuilder.UpdateFence(entry.Model, data.BaseLevel)
+	updateSign(entry, data)
+	Remotes.Notify(player, "Base upgraded", "Now " .. capacity(data) .. " slots.")
 end
 
 ---------------------------------------------------------------------
 -- Вылупление
 ---------------------------------------------------------------------
 
-local function hatchSlot(player, data, index, slot)
-	local item = slot.Item
+local function hatch(data, id, placed)
+	local item = placed.Item
 	item.HatchLeft = nil
 	item.Mutation = Formulas.RollMutation(rng)
-	setSlot(data, index, { Type = "Mob", Item = item })
+	placed.Type = "Mob"
+	placed.HatchEndsAt = nil
 	data.Index[item.MobId] = true -- индекс мобов (этап 7)
 	return item
 end
@@ -343,10 +419,9 @@ end
 local function processHatching(player, data, notify)
 	local now = os.time()
 	local hatched = false
-	for key, slot in pairs(data.Plot.Slots) do
-		local index = tonumber(key)
-		if index and slot.Type == "Egg" and now >= (slot.HatchEndsAt or 0) then
-			local item = hatchSlot(player, data, index, slot)
+	for id, placed in pairs(data.Plot.Items) do
+		if placed.Type == "Egg" and now >= (placed.HatchEndsAt or 0) then
+			local item = hatch(data, id, placed)
 			hatched = true
 			if notify then
 				Remotes.Notify(player, "Egg hatched!", InventoryService.Describe(item))
@@ -364,19 +439,18 @@ local function processHatching(player, data, notify)
 	return hatched
 end
 
--- Мгновенное вылупление (для Developer Product на этапе 10 и тестовой команды)
-function PlotService.HatchNow(player, index)
+-- Мгновенное вылупление (Developer Product на этапе 10 и тестовая команда)
+function PlotService.HatchNow(player, id)
 	local data = DataService.Get(player)
 	if not data then
 		return false
 	end
-	local slot = getSlot(data, index)
-	if not slot or slot.Type ~= "Egg" then
+	local placed = data.Plot.Items[tostring(id)]
+	if not placed or placed.Type ~= "Egg" then
 		return false
 	end
-	slot.HatchEndsAt = os.time()
-	local item = hatchSlot(player, data, index, slot)
-	Remotes.Notify(player, "Egg hatched!", InventoryService.Describe(item))
+	placed.HatchEndsAt = os.time()
+	processHatching(player, data, true)
 	PlotService.RefreshPlot(player)
 	recalcIncome(player)
 	return true
@@ -385,65 +459,6 @@ end
 ---------------------------------------------------------------------
 -- Выдача и освобождение участка
 ---------------------------------------------------------------------
-
-local function buildPrompts(entry)
-	for index, slotPart in pairs(entry.SlotParts) do
-		entry.Original[slotPart] = { Color = slotPart.Color, Transparency = slotPart.Transparency }
-
-		local main = Instance.new("ProximityPrompt")
-		main.Name = "SlotPrompt"
-		main.ActionText = "Place"
-		main.ObjectText = "Slot " .. index
-		main.KeyboardKeyCode = Enum.KeyCode.E
-		main.GamepadKeyCode = Enum.KeyCode.ButtonX
-		main.RequiresLineOfSight = false
-		main.MaxActivationDistance = 10
-		main.Parent = slotPart
-		main.Triggered:Connect(function(player)
-			onMainPrompt(player, entry, index)
-		end)
-
-		local sell = Instance.new("ProximityPrompt")
-		sell.Name = "SellPrompt"
-		sell.ActionText = "Sell"
-		sell.ObjectText = ""
-		sell.KeyboardKeyCode = Enum.KeyCode.F
-		sell.GamepadKeyCode = Enum.KeyCode.ButtonY
-		sell.RequiresLineOfSight = false
-		sell.MaxActivationDistance = 10
-		sell.Enabled = false
-		sell.UIOffset = Vector2.new(0, 60)
-		sell.Parent = slotPart
-		sell.Triggered:Connect(function(player)
-			onSellPrompt(player, entry, index)
-		end)
-
-		entry.Prompts[index] = { Main = main, Sell = sell }
-		entry.Labels[index] = PlotBuilder.EnsureSlotLabel(slotPart)
-	end
-end
-
-local function clearPrompts(entry)
-	for index, prompts in pairs(entry.Prompts) do
-		prompts.Main:Destroy()
-		prompts.Sell:Destroy()
-		entry.Prompts[index] = nil
-	end
-	for slotPart, original in pairs(entry.Original) do
-		if slotPart.Parent then
-			slotPart.Color = original.Color
-			slotPart.Transparency = original.Transparency
-		end
-		entry.Original[slotPart] = nil
-	end
-	for index, slotPart in pairs(entry.SlotParts) do
-		PlotBuilder.ClearSlot(slotPart)
-		local label = entry.Labels[index]
-		if label then
-			label.Text = ""
-		end
-	end
-end
 
 local function teleportToPlot(player, entry, character)
 	local cframe = PlotBuilder.GetSpawnCFrame(entry.Model)
@@ -473,12 +488,9 @@ local function claimPlot(player, data)
 	entry.Owner = player
 	byPlayer[player] = entry
 	player:SetAttribute("PlotName", entry.Model.Name)
-	player:SetAttribute("Slots", Formulas.BaseSlots(data.BaseLevel))
-	PlotBuilder.SetSignText(entry.Model, player.DisplayName .. "'s Base")
-	buildPrompts(entry)
-	refreshAllSlots(entry)
+	player:SetAttribute("Slots", capacity(data))
+	renderPlot(entry)
 
-	-- Появление на своём участке
 	entry.CharacterConnection = player.CharacterAdded:Connect(function(character)
 		task.defer(teleportToPlot, player, entry, character)
 	end)
@@ -490,6 +502,7 @@ end
 
 local function releasePlot(player)
 	local entry = byPlayer[player]
+	lastPlaceAt[player] = nil
 	if not entry then
 		return
 	end
@@ -497,10 +510,17 @@ local function releasePlot(player)
 		entry.CharacterConnection:Disconnect()
 		entry.CharacterConnection = nil
 	end
-	clearPrompts(entry)
-	PlotBuilder.SetSignText(entry.Model, "Empty Base")
+	for id in pairs(entry.Models) do
+		clearItemVisual(entry, id)
+	end
 	entry.Owner = nil
 	byPlayer[player] = nil
+	PlotBuilder.UpdateFence(entry.Model, 0)
+	PlotBuilder.SetSignText(entry.Model, "Empty Base")
+	PlotBuilder.SetUpgradeText(entry.Model, "")
+	if entry.UpgradePrompt then
+		entry.UpgradePrompt.Enabled = false
+	end
 end
 
 ---------------------------------------------------------------------
@@ -508,6 +528,8 @@ end
 ---------------------------------------------------------------------
 
 local function onProfileLoaded(player, data)
+	migrateOldSlots(data)
+
 	-- 1. Офлайн-доход считаем ДО вылупления: платим только за тех мобов,
 	--    которые уже стояли на участке, когда игрок вышел.
 	EconomyService.ApplyOfflineIncome(player, EconomyService.CalculateBaseIncome(data))
@@ -528,17 +550,17 @@ local function onProfileLoaded(player, data)
 	task.spawn(PassService.Has, player, "X2Hatch")
 end
 
--- Купил геймпасс x2 вылупление — ускоряем яйца, которые уже лежат в слотах
+-- Купил геймпасс x2 вылупление — ускоряем яйца, которые уже стоят на участке
 local function onHatchPassGranted(player)
 	local data = DataService.Get(player)
 	if not data then
 		return
 	end
 	local now = os.time()
-	for _, slot in pairs(data.Plot.Slots) do
-		if slot.Type == "Egg" then
-			local left = math.max(0, (slot.HatchEndsAt or 0) - now)
-			slot.HatchEndsAt = now + math.floor(left / 2)
+	for _, placed in pairs(data.Plot.Items) do
+		if placed.Type == "Egg" then
+			local left = math.max(0, (placed.HatchEndsAt or 0) - now)
+			placed.HatchEndsAt = now + math.floor(left / 2)
 		end
 	end
 	PlotService.RefreshPlot(player)
@@ -553,7 +575,7 @@ local function tick(deltaTime)
 		local data = DataService.Get(player)
 		if data then
 			if processHatching(player, data, true) then
-				refreshAllSlots(entry)
+				renderPlot(entry)
 				recalcIncome(player)
 			end
 
@@ -563,11 +585,12 @@ local function tick(deltaTime)
 			end
 
 			-- Обновляем только таймеры яиц, остальные подписи меняются при действиях
-			local unlockedSlots = Formulas.BaseSlots(data.BaseLevel)
-			for index, label in pairs(entry.Labels) do
-				local slot = getSlot(data, index)
-				if slot and slot.Type == "Egg" and index <= unlockedSlots then
-					label.Text = labelForSlot(data, index, slot, unlockedSlots)
+			for id, placed in pairs(data.Plot.Items) do
+				if placed.Type == "Egg" then
+					local label = entry.Labels[id]
+					if label then
+						label.Text = labelFor(placed)
+					end
 				end
 			end
 		end
@@ -578,25 +601,57 @@ end
 -- Запуск
 ---------------------------------------------------------------------
 
+local function setupUpgradePrompt(entry)
+	local part = PlotBuilder.GetUpgradePart(entry.Model)
+	if not part then
+		return
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "UpgradePrompt"
+	prompt.ActionText = "Upgrade Base"
+	prompt.ObjectText = ""
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
+	prompt.RequiresLineOfSight = false
+	prompt.MaxActivationDistance = 8
+	prompt.Enabled = false
+	prompt.Parent = part
+	prompt.Triggered:Connect(function(player)
+		if byPlayer[player] == entry then
+			PlotService.Upgrade(player)
+		else
+			Remotes.Notify(player, "Not your base", "This base belongs to someone else.")
+		end
+	end)
+	entry.UpgradePrompt = prompt
+end
+
 function PlotService.Init()
 	local folder = PlotBuilder.EnsurePlots()
 	for _, model in ipairs(PlotBuilder.GetPlots(folder)) do
-		local slotParts = PlotBuilder.GetSlotParts(model)
-		if next(slotParts) == nil then
-			warn("[PlotService] В участке " .. model.Name .. " нет деталей Slot1, Slot2, ... — пропускаем")
+		local floor = PlotBuilder.GetFloor(model)
+		if not floor then
+			warn("[PlotService] В участке " .. model.Name .. " нет детали Floor — пропускаем")
 		else
-			table.insert(plots, {
+			local entry = {
 				Model = model,
-				SlotParts = slotParts,
+				Floor = floor,
+				Placed = PlotBuilder.EnsurePlacedFolder(model),
 				Owner = nil,
-				Prompts = {},
+				Models = {},
 				Labels = {},
-				Original = {},
-			})
+			}
+			setupUpgradePrompt(entry)
+			PlotBuilder.UpdateFence(model, 0)
 			PlotBuilder.SetSignText(model, "Empty Base")
+			table.insert(plots, entry)
 		end
 	end
 	print("[PlotService] Участков готово: " .. #plots)
+
+	Remotes.Event("PlaceItem").OnServerEvent:Connect(function(player)
+		PlotService.PlaceFromBackpack(player)
+	end)
 
 	DataService.ProfileLoaded:Connect(onProfileLoaded)
 	Players.PlayerRemoving:Connect(releasePlot)

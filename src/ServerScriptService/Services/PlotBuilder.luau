@@ -1,15 +1,26 @@
 -- PlotBuilder: всё, что связано с деталями участка в Workspace.
 --
 -- ВАЖНО про модели. Пока ты не сделал свои модели, этот файл строит временные
--- кубики, чтобы игру можно было проверить. Как только в игре появятся настоящие
--- модели, временные перестанут создаваться сами собой:
+-- кубики, чтобы игру можно было проверить. Как только появятся настоящие модели,
+-- временные перестанут создаваться сами собой.
 --
---   * Участки: положи в Workspace папку "Plots", а в неё модели "Plot1", "Plot2", ...
---     Внутри каждой модели: детали "Slot1", "Slot2", ... (куда встают яйца и мобы)
---     и деталь "Spawn" (где появляется хозяин участка). Деталь "Sign" — необязательно.
---   * Яйца: ReplicatedStorage.Assets.Eggs.<EggModelName> (см. Config/Mobs.luau)
---   * Мобы: ReplicatedStorage.Assets.Mobs.<ModelName>
---     У каждой модели обязательно должен быть выставлен PrimaryPart.
+-- Что игра ждёт от модели участка (Workspace.Plots.Plot1, Plot2, ...):
+--   Floor    — деталь-пол. По ней игра понимает границы участка: ставить яйца
+--              можно только над ней. Обязательная деталь.
+--   Spawn    — деталь, где появляется хозяин участка.
+--   Sign     — необязательно. На ней появится табличка с именем и числом мест.
+--   Upgrade  — необязательно. Тумба, у которой покупают улучшение участка.
+--              Если её нет, улучшение покупается у таблички Sign.
+--   Fences   — необязательно. Папка с моделями заборов: Fence0, Fence3, Fence7...
+--              Число в имени — с какого уровня улучшения показывать этот забор.
+--              Если папки нет, игра строит простой забор из деталей сама.
+--
+-- Отдельных деталей под слоты БОЛЬШЕ НЕ НУЖНО: игрок ставит яйцо в любом
+-- свободном месте участка, а уровень улучшения задаёт только число мест.
+--
+-- Модели яиц и мобов:
+--   ReplicatedStorage.Assets.Eggs.<EggModelName>, .Mobs.<ModelName>
+--   У каждой модели обязательно должен быть выставлен PrimaryPart.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -41,45 +52,181 @@ local function makePart(name, size, cframe, color, parent)
 	return part
 end
 
--- Номер из имени "Slot12" -> 12
-local function slotNumber(name)
-	return tonumber(string.match(name, "^Slot(%d+)$"))
+local function makeLabel(parent, name, size, offset, maxDistance)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = name
+	gui.Size = size
+	gui.StudsOffset = offset
+	gui.MaxDistance = maxDistance
+	gui.AlwaysOnTop = false
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeTransparency = 0.4
+	label.Text = ""
+	label.Parent = gui
+
+	gui.Parent = parent
+	return label
 end
 
 ---------------------------------------------------------------------
--- Временный участок
+-- Границы участка
+---------------------------------------------------------------------
+
+-- Пол участка. По нему считаются границы.
+function PlotBuilder.GetFloor(plotModel)
+	local floor = plotModel:FindFirstChild("Floor", true) or plotModel:FindFirstChild("Area", true)
+	if floor and floor:IsA("BasePart") then
+		return floor
+	end
+	if plotModel:IsA("Model") and plotModel.PrimaryPart then
+		return plotModel.PrimaryPart
+	end
+	return plotModel:FindFirstChildWhichIsA("BasePart", true)
+end
+
+-- Переводит мировую точку в координаты участка (x, z от центра пола)
+function PlotBuilder.ToLocal(floor, worldPosition)
+	local local3 = floor.CFrame:PointToObjectSpace(worldPosition)
+	return local3.X, local3.Z
+end
+
+-- Помещается ли точка внутри участка с отступом от забора
+function PlotBuilder.IsInside(floor, x, z)
+	local halfX = floor.Size.X / 2 - P.PlaceMargin
+	local halfZ = floor.Size.Z / 2 - P.PlaceMargin
+	return math.abs(x) <= halfX and math.abs(z) <= halfZ
+end
+
+-- Загоняет точку внутрь участка (на случай, если участок оказался меньше)
+function PlotBuilder.Clamp(floor, x, z)
+	local halfX = math.max(0, floor.Size.X / 2 - P.PlaceMargin)
+	local halfZ = math.max(0, floor.Size.Z / 2 - P.PlaceMargin)
+	return math.clamp(x, -halfX, halfX), math.clamp(z, -halfZ, halfZ)
+end
+
+---------------------------------------------------------------------
+-- Забор
+---------------------------------------------------------------------
+
+local function styleForLevel(level)
+	local best = P.FenceStyles[1]
+	for _, style in ipairs(P.FenceStyles) do
+		if level >= style.MinLevel then
+			best = style
+		end
+	end
+	return best
+end
+
+-- Строит простой забор из столбиков по краю пола, с проходом у Spawn
+local function buildSimpleFence(plotModel, floor, style)
+	local old = plotModel:FindFirstChild("SimpleFence")
+	if old then
+		old:Destroy()
+	end
+
+	local fence = Instance.new("Model")
+	fence.Name = "SimpleFence"
+
+	local top = floor.Size.Y / 2
+	local halfX, halfZ = floor.Size.X / 2, floor.Size.Z / 2
+	local step = 4
+
+	local function post(x, z)
+		-- Проход у ближнего края (там, где Spawn)
+		if z > halfZ - 0.1 and math.abs(x) < 6 then
+			return
+		end
+		local cframe = floor.CFrame * CFrame.new(x, top + style.Height / 2, z)
+		local part = makePart("Post", Vector3.new(0.6, style.Height, 0.6), cframe, style.Color, fence)
+		part.Material = style.Material
+		part.CanCollide = false
+	end
+
+	local x = -halfX
+	while x <= halfX do
+		post(x, -halfZ)
+		post(x, halfZ)
+		x = x + step
+	end
+	local z = -halfZ + step
+	while z <= halfZ - step do
+		post(-halfX, z)
+		post(halfX, z)
+		z = z + step
+	end
+
+	fence.Parent = plotModel
+end
+
+-- Показывает забор, который соответствует уровню участка
+function PlotBuilder.UpdateFence(plotModel, level)
+	local fences = plotModel:FindFirstChild("Fences")
+	if fences then
+		-- Свои модели автора: Fence0, Fence3, Fence7... показываем подходящую
+		local bestChild, bestLevel
+		for _, child in ipairs(fences:GetChildren()) do
+			local minLevel = tonumber(string.match(child.Name, "(%d+)$"))
+			if minLevel and level >= minLevel and (not bestLevel or minLevel > bestLevel) then
+				bestChild, bestLevel = child, minLevel
+			end
+		end
+		-- Показываем один забор, остальные прячем. Настоящую прозрачность
+		-- детали запоминаем один раз, чтобы не испортить модель автора.
+		for _, child in ipairs(fences:GetChildren()) do
+			for _, part in ipairs(child:GetDescendants()) do
+				if part:IsA("BasePart") then
+					if part:GetAttribute("BaseTransparency") == nil then
+						part:SetAttribute("BaseTransparency", part.Transparency)
+					end
+					part.Transparency = (child == bestChild) and part:GetAttribute("BaseTransparency") or 1
+				end
+			end
+		end
+		return
+	end
+
+	local floor = PlotBuilder.GetFloor(plotModel)
+	if floor then
+		buildSimpleFence(plotModel, floor, styleForLevel(level))
+	end
+end
+
+---------------------------------------------------------------------
+-- Временные участки
 ---------------------------------------------------------------------
 
 local function buildTempPlot(index, parent)
-	local rows = math.ceil(GameConfig.Base.MaxSlots / P.SlotsPerRow)
-	local width = P.SlotsPerRow * P.SlotSpacing + 8
-	local depth = rows * P.SlotSpacing + 20
-	-- Участки стоят в ряд и центрируются вокруг TempOrigin
+	local size = P.TempFloorSize
 	local offsetX = (index - 1 - (P.TempCount - 1) / 2) * P.TempSpacing
 	local origin = P.TempOrigin + Vector3.new(offsetX, 0, 0)
 
 	local model = Instance.new("Model")
 	model.Name = "Plot" .. index
 
-	local floor = makePart("Floor", Vector3.new(width, 1, depth), CFrame.new(origin), Color3.fromRGB(90, 140, 80), model)
+	local floor = makePart("Floor", size, CFrame.new(origin), Color3.fromRGB(95, 145, 85), model)
+	floor.Material = Enum.Material.Grass
 	model.PrimaryPart = floor
 
-	-- Место появления хозяина — у ближнего края участка
-	makePart("Spawn", Vector3.new(8, 1, 8), CFrame.new(origin + Vector3.new(0, 0.6, depth / 2 - 6)), Color3.fromRGB(230, 230, 230), model)
+	local top = origin.Y + size.Y / 2
+
+	-- Место появления хозяина — у ближнего края, в проходе забора
+	makePart("Spawn", Vector3.new(8, 0.2, 6), CFrame.new(origin.X, top + 0.1, origin.Z + size.Z / 2 - 4), Color3.fromRGB(235, 235, 235), model)
 
 	-- Табличка с именем владельца
-	makePart("Sign", Vector3.new(6, 1, 1), CFrame.new(origin + Vector3.new(0, 4, depth / 2 - 1)), Color3.fromRGB(120, 90, 60), model)
+	makePart("Sign", Vector3.new(8, 1, 1), CFrame.new(origin.X, top + 4, origin.Z + size.Z / 2 + 1), Color3.fromRGB(120, 90, 60), model)
 
-	-- Сетка слотов
-	local gridCenterZ = origin.Z - 4
-	local startX = origin.X - (P.SlotsPerRow - 1) * P.SlotSpacing / 2
-	local startZ = gridCenterZ - (rows - 1) * P.SlotSpacing / 2
-	for i = 1, GameConfig.Base.MaxSlots do
-		local col = (i - 1) % P.SlotsPerRow
-		local row = math.floor((i - 1) / P.SlotsPerRow)
-		local position = Vector3.new(startX + col * P.SlotSpacing, origin.Y + 0.75, startZ + row * P.SlotSpacing)
-		makePart("Slot" .. i, Vector3.new(P.SlotSize, 0.5, P.SlotSize), CFrame.new(position), Color3.fromRGB(150, 150, 150), model)
-	end
+	-- Тумба улучшения участка
+	-- Тумба стоит ЗА полом: её подсказка не должна мешать ставить яйца внутри
+	local upgrade = makePart("Upgrade", Vector3.new(4, 3, 4), CFrame.new(origin.X + 8, top + 1.5, origin.Z + size.Z / 2 + 3), Color3.fromRGB(230, 180, 50), model)
+	upgrade.Material = Enum.Material.Metal
 
 	model.Parent = parent
 	return model
@@ -106,8 +253,7 @@ end
 function PlotBuilder.GetPlots(folder)
 	local list = {}
 	for _, model in ipairs(folder:GetChildren()) do
-		local number = tonumber(string.match(model.Name, "(%d+)$")) or math.huge
-		table.insert(list, { Model = model, Number = number })
+		table.insert(list, { Model = model, Number = tonumber(string.match(model.Name, "(%d+)$")) or math.huge })
 	end
 	table.sort(list, function(a, b)
 		if a.Number == b.Number then
@@ -122,37 +268,41 @@ function PlotBuilder.GetPlots(folder)
 	return result
 end
 
--- Детали Slot1..SlotN участка, по порядку номера
-function PlotBuilder.GetSlotParts(plotModel)
-	local parts = {}
-	for _, descendant in ipairs(plotModel:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			local number = slotNumber(descendant.Name)
-			if number then
-				parts[number] = descendant
-			end
-		end
-	end
-	return parts
-end
-
 -- Где появляется хозяин участка
 function PlotBuilder.GetSpawnCFrame(plotModel)
 	local spawnPart = plotModel:FindFirstChild("Spawn", true)
 	if spawnPart and spawnPart:IsA("BasePart") then
 		return spawnPart.CFrame + Vector3.new(0, spawnPart.Size.Y / 2 + 3, 0)
 	end
-	local ok, cframe = pcall(function()
-		return plotModel:GetPivot()
-	end)
-	if ok then
-		return cframe + Vector3.new(0, 5, 0)
+	local floor = PlotBuilder.GetFloor(plotModel)
+	if floor then
+		return floor.CFrame + Vector3.new(0, floor.Size.Y / 2 + 3, 0)
 	end
 	return nil
 end
 
+-- У какой детали покупают улучшение участка
+function PlotBuilder.GetUpgradePart(plotModel)
+	local part = plotModel:FindFirstChild("Upgrade", true) or plotModel:FindFirstChild("Sign", true)
+	if part and part:IsA("BasePart") then
+		return part
+	end
+	return nil
+end
+
+-- Папка, куда складываются поставленные яйца и мобы
+function PlotBuilder.EnsurePlacedFolder(plotModel)
+	local folder = plotModel:FindFirstChild("Placed")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "Placed"
+		folder.Parent = plotModel
+	end
+	return folder
+end
+
 ---------------------------------------------------------------------
--- Табличка с именем владельца
+-- Таблички
 ---------------------------------------------------------------------
 
 function PlotBuilder.SetSignText(plotModel, text)
@@ -161,58 +311,39 @@ function PlotBuilder.SetSignText(plotModel, text)
 		return
 	end
 	local gui = sign:FindFirstChild("PlotSign")
-	if not gui then
-		gui = Instance.new("BillboardGui")
-		gui.Name = "PlotSign"
-		gui.Size = UDim2.fromScale(10, 2)
-		gui.StudsOffsetWorldSpace = Vector3.new(0, 2, 0)
-		gui.AlwaysOnTop = false
-		gui.MaxDistance = 200
-
-		local label = Instance.new("TextLabel")
-		label.Name = "Label"
-		label.Size = UDim2.fromScale(1, 1)
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.GothamBold
-		label.TextScaled = true
-		label.TextColor3 = Color3.fromRGB(255, 255, 255)
-		label.TextStrokeTransparency = 0.4
-		label.Parent = gui
-
-		gui.Parent = sign
+	local label = gui and gui:FindFirstChild("Label")
+	if not label then
+		label = makeLabel(sign, "PlotSign", UDim2.fromScale(12, 2.5), Vector3.new(0, 2, 0), 250)
 	end
-	gui.Label.Text = text
+	label.Text = text
 end
 
----------------------------------------------------------------------
--- Подпись над слотом (временный интерфейс до этапа 11)
----------------------------------------------------------------------
-
-function PlotBuilder.EnsureSlotLabel(slotPart)
-	local gui = slotPart:FindFirstChild("SlotInfo")
-	if gui then
-		return gui.Label
+function PlotBuilder.SetUpgradeText(plotModel, text)
+	local part = PlotBuilder.GetUpgradePart(plotModel)
+	if not part then
+		return
 	end
-	gui = Instance.new("BillboardGui")
-	gui.Name = "SlotInfo"
-	gui.Size = UDim2.fromScale(8, 2)
-	gui.StudsOffset = Vector3.new(0, 5, 0)
-	gui.AlwaysOnTop = false
-	gui.MaxDistance = 80
+	local gui = part:FindFirstChild("UpgradeSign")
+	local label = gui and gui:FindFirstChild("Label")
+	if not label then
+		label = makeLabel(part, "UpgradeSign", UDim2.fromScale(9, 2.5), Vector3.new(0, 3, 0), 120)
+	end
+	label.Text = text
+end
 
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamMedium
-	label.TextScaled = true
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextStrokeTransparency = 0.4
-	label.Text = ""
-	label.Parent = gui
-
-	gui.Parent = slotPart
-	return label
+-- Подпись над поставленным предметом
+function PlotBuilder.EnsureItemLabel(model)
+	local anchor = model.PrimaryPart
+	if not anchor then
+		return nil
+	end
+	local gui = anchor:FindFirstChild("ItemInfo")
+	local label = gui and gui:FindFirstChild("Label")
+	if label then
+		return label
+	end
+	local height = model:GetExtentsSize().Y
+	return makeLabel(anchor, "ItemInfo", UDim2.fromScale(8, 2), Vector3.new(0, height / 2 + 2.5, 0), 90)
 end
 
 ---------------------------------------------------------------------
@@ -249,7 +380,7 @@ local function buildTempModel(item, kind)
 	return model
 end
 
--- Готовая модель предмета для слота. kind = "Egg" или "Mob".
+-- Готовая модель предмета. kind = "Egg" или "Mob".
 function PlotBuilder.MakeItemModel(item, kind)
 	local mob = Mobs[item.MobId]
 	local modelName
@@ -264,8 +395,7 @@ function PlotBuilder.MakeItemModel(item, kind)
 	if template then
 		model = template:Clone()
 		if not model.PrimaryPart then
-			local first = model:FindFirstChildWhichIsA("BasePart", true)
-			model.PrimaryPart = first
+			model.PrimaryPart = model:FindFirstChildWhichIsA("BasePart", true)
 			warn("[PlotBuilder] У модели " .. modelName .. " не выставлен PrimaryPart")
 		end
 	else
@@ -285,7 +415,7 @@ function PlotBuilder.MakeItemModel(item, kind)
 		warn("[PlotBuilder] Не удалось изменить размер модели " .. tostring(modelName))
 	end
 
-	-- Мутация перекрашивает модель. Если у мутации убрать Color,
+	-- Мутация перекрашивает модель моба. Если у мутации убрать Color,
 	-- модель останется такой, какой её сделал автор.
 	local mutation = kind == "Mob" and Mutations.Get(item.Mutation) or nil
 
@@ -293,7 +423,6 @@ function PlotBuilder.MakeItemModel(item, kind)
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
 			descendant.CanCollide = false
-			descendant.CanQuery = false
 			descendant.CanTouch = false
 			if mutation and mutation.Color then
 				descendant.Color = mutation.Color
@@ -304,25 +433,11 @@ function PlotBuilder.MakeItemModel(item, kind)
 	return model
 end
 
--- Ставит модель на слот и возвращает её
-function PlotBuilder.ShowOnSlot(slotPart, model)
-	PlotBuilder.ClearSlot(slotPart)
-	if not model then
-		return nil
-	end
-	local size = model:GetExtentsSize()
-	local top = slotPart.Position.Y + slotPart.Size.Y / 2
-	model:PivotTo(CFrame.new(slotPart.Position.X, top + size.Y / 2, slotPart.Position.Z))
-	model.Name = "Display"
-	model.Parent = slotPart
-	return model
-end
-
-function PlotBuilder.ClearSlot(slotPart)
-	local old = slotPart:FindFirstChild("Display")
-	if old then
-		old:Destroy()
-	end
+-- Ставит модель на участок: x, z — координаты от центра пола, yaw — поворот
+function PlotBuilder.PlaceModel(model, floor, x, z, yaw)
+	local height = model:GetExtentsSize().Y
+	local base = floor.CFrame * CFrame.new(x, floor.Size.Y / 2 + height / 2, z)
+	model:PivotTo(base * CFrame.Angles(0, yaw or 0, 0))
 end
 
 return PlotBuilder

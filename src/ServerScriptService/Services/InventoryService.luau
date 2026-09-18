@@ -47,6 +47,15 @@ local function nextItemId(data)
 	return tostring(id)
 end
 
+-- Следующий свободный номер предмета. Номера общие для рюкзака и участка.
+function InventoryService.NextId(player)
+	local data = DataService.Get(player)
+	if not data then
+		return nil
+	end
+	return nextItemId(data)
+end
+
 -- Собирает корректный предмет или возвращает nil, если данные мусорные
 function InventoryService.MakeItem(mobId, rarity, weight, mutation)
 	if not Mobs[mobId] then
