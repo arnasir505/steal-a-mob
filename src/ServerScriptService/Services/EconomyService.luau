@@ -25,6 +25,7 @@ local moneyMultiplier = {} -- [player] = множитель денег от ге
 
 local INCOME_STAT = "Income/s"
 local MONEY_STAT = "Money"
+local SPEED_STAT = "Speed"
 
 local function isValidAmount(n)
 	return type(n) == "number" and n == n and n > -math.huge and n < math.huge
@@ -45,6 +46,11 @@ local function createLeaderstats(player)
 	money.Value = "0"
 	money.Parent = leaderstats
 
+	local speed = Instance.new("StringValue")
+	speed.Name = SPEED_STAT
+	speed.Value = "1"
+	speed.Parent = leaderstats
+
 	leaderstats.Parent = player
 end
 
@@ -62,6 +68,7 @@ function EconomyService.Refresh(player)
 	if leaderstats then
 		leaderstats[MONEY_STAT].Value = Format.Number(data.Money)
 		leaderstats[INCOME_STAT].Value = Format.Number(incomePerSecond[player] or 0)
+		leaderstats[SPEED_STAT].Value = Format.Number(data.Speed)
 	end
 end
 

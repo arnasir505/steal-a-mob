@@ -34,6 +34,7 @@ local DataService = require(script.Parent.DataService)
 local EconomyService = require(script.Parent.EconomyService)
 local InventoryService = require(script.Parent.InventoryService)
 local PassService = require(script.Parent.PassService)
+local SpeedService = require(script.Parent.SpeedService)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 
 local PlotService = {}
@@ -468,6 +469,7 @@ local function teleportToPlot(player, entry, character)
 	local root = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
 	if root and character.Parent then
 		character:PivotTo(cframe)
+		SpeedService.MarkTeleport(player) -- это честный телепорт, не нарушение
 	end
 end
 
@@ -489,6 +491,8 @@ local function claimPlot(player, data)
 	byPlayer[player] = entry
 	player:SetAttribute("PlotName", entry.Model.Name)
 	player:SetAttribute("Slots", capacity(data))
+	SpeedService.SetTreadmill(player, PlotBuilder.GetTreadmill(entry.Model))
+	PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(player))
 	renderPlot(entry)
 
 	entry.CharacterConnection = player.CharacterAdded:Connect(function(character)
@@ -515,6 +519,8 @@ local function releasePlot(player)
 	end
 	entry.Owner = nil
 	byPlayer[player] = nil
+	SpeedService.SetTreadmill(player, nil)
+	PlotBuilder.SetTreadmillText(entry.Model, "")
 	PlotBuilder.UpdateFence(entry.Model, 0)
 	PlotBuilder.SetSignText(entry.Model, "Empty Base")
 	PlotBuilder.SetUpgradeText(entry.Model, "")
@@ -584,6 +590,8 @@ local function tick(deltaTime)
 				EconomyService.AddMoney(player, income * deltaTime)
 			end
 
+			PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(player))
+
 			-- Обновляем только таймеры яиц, остальные подписи меняются при действиях
 			for id, placed in pairs(data.Plot.Items) do
 				if placed.Type == "Egg" then
@@ -626,6 +634,31 @@ local function setupUpgradePrompt(entry)
 	entry.UpgradePrompt = prompt
 end
 
+local function setupTreadmillPrompt(entry)
+	local part = PlotBuilder.GetTreadmill(entry.Model)
+	if not part then
+		return
+	end
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "TreadmillPrompt"
+	prompt.ActionText = "Upgrade Treadmill"
+	prompt.ObjectText = ""
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
+	prompt.RequiresLineOfSight = false
+	prompt.MaxActivationDistance = 8
+	prompt.Parent = part
+	prompt.Triggered:Connect(function(player)
+		if byPlayer[player] ~= entry then
+			Remotes.Notify(player, "Not your base", "This treadmill belongs to someone else.")
+			return
+		end
+		if SpeedService.UpgradeTreadmill(player) then
+			PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(player))
+		end
+	end)
+end
+
 function PlotService.Init()
 	local folder = PlotBuilder.EnsurePlots()
 	for _, model in ipairs(PlotBuilder.GetPlots(folder)) do
@@ -642,6 +675,7 @@ function PlotService.Init()
 				Labels = {},
 			}
 			setupUpgradePrompt(entry)
+			setupTreadmillPrompt(entry)
 			PlotBuilder.UpdateFence(model, 0)
 			PlotBuilder.SetSignText(model, "Empty Base")
 			table.insert(plots, entry)

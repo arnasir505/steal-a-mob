@@ -13,6 +13,10 @@
 --   !plot                  — показать участок
 --   !hatch                 — вылупить все яйца на участке прямо сейчас
 --   !slots 3               — поднять уровень участка бесплатно
+--   !treadmill 5           — поднять уровень дорожки бесплатно
+--   !trail BlueTrail       — купить трейл (без имени — список трейлов)
+--   !equip BlueTrail       — надеть трейл (!equip off — снять)
+--   !speedinfo             — показать, из чего складывается скорость
 --   !data                  — вывести все данные игрока в Output
 --   !wipe                  — сбросить прогресс
 --   !formulas              — вывести примеры формул в Output
@@ -32,6 +36,8 @@ local DataService = require(Services.DataService)
 local EconomyService = require(Services.EconomyService)
 local InventoryService = require(Services.InventoryService)
 local PlotService = require(Services.PlotService)
+local SpeedService = require(Services.SpeedService)
+local TrailService = require(Services.TrailService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
 local Format = require(ReplicatedStorage.Shared.Format)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
@@ -39,6 +45,7 @@ local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
 local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
 local Biomes = require(ReplicatedStorage.Shared.Config.Biomes)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
+local Items = require(ReplicatedStorage.Shared.Config.Items)
 
 local rng = Random.new()
 
@@ -104,8 +111,10 @@ local function printFormulas()
 			Formulas.FuseUpgradeChance(weight) * 100
 		))
 	end
-	for _, speed in ipairs({ 1, 100, 10000, 1000000, 1000000000 }) do
-		print("Speed " .. Format.Number(speed) .. " -> WalkSpeed " .. string.format("%.1f", Formulas.WalkSpeed(speed)))
+	for _, speed in ipairs({ 1, 10, 100, 1000, 1e6, 1e9, 1e12, 1e15, 1e18, 1e21 }) do
+		local walkSpeed = Formulas.WalkSpeed(speed)
+		print(string.format("Speed %-8s -> WalkSpeed %5.0f  (%.1f студа за кадр, погоня +-%.0f)",
+			Format.Number(speed), walkSpeed, walkSpeed / 60, Formulas.ChaseDelta(walkSpeed)))
 	end
 	print("Random egg weights:", Formulas.RollSpawnWeight(rng), Formulas.RollSpawnWeight(rng), Formulas.RollSpawnWeight(rng))
 	print("Offline 3 days at 10/s:", Format.Number(Formulas.OfflineIncome(10, 3 * 86400)))
@@ -171,6 +180,33 @@ local function printRarities()
 				id, chance * 100, perRound * 100, Format.Time(roundSeconds / perRound)
 			))
 		end
+	end
+end
+
+local function printSpeedInfo(player)
+	local data = DataService.Get(player)
+	if not data then
+		return
+	end
+	print("--- Speed of " .. player.Name .. " ---")
+	print("  стата:            " .. Format.Number(data.Speed))
+	print("  геймпасс x2:      " .. tostring(player:GetAttribute("Pass_X2Speed") == true))
+	print("  вес яйца в руках: " .. Format.Number(player:GetAttribute("CarryWeight") or 0) .. " кг")
+	print("  эффективная:      " .. Format.Number(SpeedService.GetEffectiveSpeed(player)))
+	print("  WalkSpeed:        " .. string.format("%.1f", SpeedService.GetWalkSpeed(player))
+		.. " (предел " .. GameConfig.Speed.MaxWalkSpeed .. ")")
+	print("  дорожка ур." .. data.TreadmillLevel .. ": +" .. Format.Number(SpeedService.GetTreadmillGain(player)) .. "/сек"
+		.. " (трейл x" .. TrailService.GetMultiplier(player) .. ")")
+	print("  трейл:            " .. (data.EquippedTrail ~= "" and data.EquippedTrail or "нет"))
+end
+
+local function printTrails(player)
+	local data = DataService.Get(player)
+	print("--- Trails ---")
+	for id, config in pairs(Items.Trails) do
+		local owned = data and data.Trails[id] and " (куплен)" or ""
+		print(string.format("  %-14s $%-10s дорожка x%s%s",
+			id, Format.Number(config.Price), config.TreadmillMult, owned))
 	end
 end
 
@@ -274,6 +310,29 @@ local function onChatted(player, message)
 		printRarities()
 	elseif command == "sell" then
 		sellBackpack(player, words[2] and string.lower(words[2]) or nil)
+	elseif command == "treadmill" then
+		local data = DataService.Get(player)
+		if data then
+			data.TreadmillLevel = math.clamp(data.TreadmillLevel + (number or 1), 0, GameConfig.Treadmill.MaxLevel)
+			player:SetAttribute("TreadmillLevel", data.TreadmillLevel)
+			printSpeedInfo(player)
+		end
+	elseif command == "trail" then
+		local id = words[2] and findKey(Items.Trails, words[2])
+		if id then
+			TrailService.Buy(player, id)
+		end
+		printTrails(player)
+	elseif command == "equip" then
+		local word = words[2]
+		if word == nil or string.lower(word) == "off" then
+			TrailService.Equip(player, "")
+		else
+			TrailService.Equip(player, findKey(Items.Trails, word) or word)
+		end
+		printSpeedInfo(player)
+	elseif command == "speedinfo" then
+		printSpeedInfo(player)
 	elseif command == "bag" then
 		printBackpack(player)
 	elseif command == "plot" then

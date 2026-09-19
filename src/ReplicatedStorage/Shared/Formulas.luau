@@ -173,12 +173,19 @@ function Formulas.WalkSpeed(effectiveSpeed)
 	return math.min(S.MaxWalkSpeed, S.BaseWalkSpeed + log10(effectiveSpeed) * S.WalkSpeedPerLog)
 end
 
--- Реальная скорость босса в погоне: исход решают статы, а не реальная скорость
+-- Реальная скорость босса в погоне: исход решают статы, а не реальная скорость.
+-- Разница берётся в процентах от скорости игрока, чтобы на больших скоростях
+-- босс отставал (или догонял) заметно, а не по 2 студа в секунду.
+function Formulas.ChaseDelta(playerWalkSpeed)
+	return math.max(S.ChaseSpeedDelta, playerWalkSpeed * S.ChaseSpeedPercent)
+end
+
 function Formulas.BossChaseWalkSpeed(playerEffectiveSpeed, bossSpeed, playerWalkSpeed)
+	local delta = Formulas.ChaseDelta(playerWalkSpeed)
 	if playerEffectiveSpeed >= bossSpeed then
-		return math.max(1, playerWalkSpeed - S.ChaseSpeedDelta) -- игрок убегает
+		return math.max(1, playerWalkSpeed - delta) -- игрок убегает
 	end
-	return playerWalkSpeed + S.ChaseSpeedDelta -- босс догоняет
+	return playerWalkSpeed + delta -- босс догоняет
 end
 
 ---------------------------------------------------------------------

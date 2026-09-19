@@ -11,6 +11,8 @@
 --   Sign     — необязательно. На ней появится табличка с именем и числом мест.
 --   Upgrade  — необязательно. Тумба, у которой покупают улучшение участка.
 --              Если её нет, улучшение покупается у таблички Sign.
+--   Treadmill— необязательно. Беговая дорожка: пока игрок стоит на ней,
+--              его скорость растёт. Улучшается за деньги там же.
 --   Fences   — необязательно. Папка с моделями заборов: Fence0, Fence3, Fence7...
 --              Число в имени — с какого уровня улучшения показывать этот забор.
 --              Если папки нет, игра строит простой забор из деталей сама.
@@ -228,6 +230,10 @@ local function buildTempPlot(index, parent)
 	local upgrade = makePart("Upgrade", Vector3.new(4, 3, 4), CFrame.new(origin.X + 8, top + 1.5, origin.Z + size.Z / 2 + 3), Color3.fromRGB(230, 180, 50), model)
 	upgrade.Material = Enum.Material.Metal
 
+	-- Беговая дорожка — тоже снаружи, чтобы не занимать место под яйца
+	local treadmill = makePart("Treadmill", Vector3.new(6, 1, 10), CFrame.new(origin.X - 9, top, origin.Z + size.Z / 2 + 5), Color3.fromRGB(60, 60, 70), model)
+	treadmill.Material = Enum.Material.DiamondPlate
+
 	model.Parent = parent
 	return model
 end
@@ -290,6 +296,15 @@ function PlotBuilder.GetUpgradePart(plotModel)
 	return nil
 end
 
+-- Беговая дорожка участка
+function PlotBuilder.GetTreadmill(plotModel)
+	local part = plotModel:FindFirstChild("Treadmill", true)
+	if part and part:IsA("BasePart") then
+		return part
+	end
+	return nil
+end
+
 -- Папка, куда складываются поставленные яйца и мобы
 function PlotBuilder.EnsurePlacedFolder(plotModel)
 	local folder = plotModel:FindFirstChild("Placed")
@@ -327,6 +342,19 @@ function PlotBuilder.SetUpgradeText(plotModel, text)
 	local label = gui and gui:FindFirstChild("Label")
 	if not label then
 		label = makeLabel(part, "UpgradeSign", UDim2.fromScale(9, 2.5), Vector3.new(0, 3, 0), 120)
+	end
+	label.Text = text
+end
+
+function PlotBuilder.SetTreadmillText(plotModel, text)
+	local part = PlotBuilder.GetTreadmill(plotModel)
+	if not part then
+		return
+	end
+	local gui = part:FindFirstChild("TreadmillSign")
+	local label = gui and gui:FindFirstChild("Label")
+	if not label then
+		label = makeLabel(part, "TreadmillSign", UDim2.fromScale(9, 2.5), Vector3.new(0, 4, 0), 120)
 	end
 	label.Text = text
 end

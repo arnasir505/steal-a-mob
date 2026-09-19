@@ -10,6 +10,8 @@ local DataService = require(Services.DataService)
 local PassService = require(Services.PassService)
 local EconomyService = require(Services.EconomyService)
 local InventoryService = require(Services.InventoryService)
+local TrailService = require(Services.TrailService)
+local SpeedService = require(Services.SpeedService)
 local PlotService = require(Services.PlotService)
 
 -- Ремоуты создаём заранее, чтобы клиент их дождался
@@ -19,6 +21,8 @@ Remotes.Event("Notify")
 PassService.Init()
 EconomyService.Init()
 InventoryService.Init()
+TrailService.Init()
+SpeedService.Init()
 PlotService.Init()
 
 -- 2. DataService запускаем последним, чтобы никто не пропустил загрузку игрока
