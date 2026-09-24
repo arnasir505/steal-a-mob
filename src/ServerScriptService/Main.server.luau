@@ -13,6 +13,7 @@ local InventoryService = require(Services.InventoryService)
 local TrailService = require(Services.TrailService)
 local SpeedService = require(Services.SpeedService)
 local PlotService = require(Services.PlotService)
+local TimeChangeService = require(Services.TimeChangeService)
 
 -- Ремоуты создаём заранее, чтобы клиент их дождался
 Remotes.Event("Notify")
@@ -24,6 +25,7 @@ InventoryService.Init()
 TrailService.Init()
 SpeedService.Init()
 PlotService.Init()
+TimeChangeService.Init()
 
 -- 2. DataService запускаем последним, чтобы никто не пропустил загрузку игрока
 DataService.Start()

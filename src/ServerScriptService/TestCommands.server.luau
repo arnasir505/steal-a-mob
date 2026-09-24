@@ -17,6 +17,8 @@
 --   !trail BlueTrail       — купить трейл (без имени — список трейлов)
 --   !equip BlueTrail       — надеть трейл (!equip off — снять)
 --   !speedinfo             — показать, из чего складывается скорость
+--   !time 20               — поставить время суток (0-24, без числа — показать)
+--   !time stop             — остановить смену дня и ночи (!time go — запустить)
 --   !data                  — вывести все данные игрока в Output
 --   !wipe                  — сбросить прогресс
 --   !formulas              — вывести примеры формул в Output
@@ -38,6 +40,7 @@ local InventoryService = require(Services.InventoryService)
 local PlotService = require(Services.PlotService)
 local SpeedService = require(Services.SpeedService)
 local TrailService = require(Services.TrailService)
+local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
 local Format = require(ReplicatedStorage.Shared.Format)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
@@ -348,6 +351,19 @@ local function onChatted(player, message)
 			PlotService.RefreshPlot(player)
 			print("Уровень участка:", data.BaseLevel, "мест:", Formulas.BaseSlots(data.BaseLevel))
 		end
+	elseif command == "time" then
+		local word = string.lower(words[2] or "")
+		if number then
+			TimeChangeService.SetClockTime(number)
+		elseif word == "stop" or word == "go" then
+			TimeChangeService.SetEnabled(word == "go")
+		end
+		print(string.format(
+			"ClockTime: %.2f (%s), running: %s",
+			TimeChangeService.GetClockTime(),
+			game:GetService("Lighting").TimeOfDay,
+			tostring(TimeChangeService.IsEnabled())
+		))
 	elseif command == "data" then
 		print(HttpService:JSONEncode(DataService.Get(player)))
 	elseif command == "wipe" then

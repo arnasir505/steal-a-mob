@@ -139,4 +139,30 @@ GameConfig.Sell = {
 	MinPrice = 1,
 }
 
+-- Смена дня и ночи (TimeChangeService).
+-- Время идёт на сервере, Lighting реплицируется всем сам, поэтому время суток
+-- у всех игроков сервера одинаковое.
+GameConfig.DayNight = {
+	Enabled = true,          -- false — время стоит, освещение как выставил автор в Studio
+	CycleMinutes = 10,       -- сколько реальных минут длятся полные игровые сутки
+	StartClockTime = 8,      -- с какого часа стартует сервер (8 = утро)
+	UpdateInterval = 0.2,    -- как часто обновлять освещение (секунды)
+	SunriseHour = 6.5,       -- когда встаёт солнце
+	SunsetHour = 18.5,       -- когда садится
+	BlendHours = 2,          -- сколько игровых часов длится рассвет/закат
+	TintLighting = true,     -- менять ли яркость и Ambient (false — крутить только время)
+
+	-- Освещение в полдень и в полночь, между ними считается плавный переход
+	Day = {
+		Ambient = Color3.fromRGB(70, 70, 75),
+		OutdoorAmbient = Color3.fromRGB(140, 140, 145),
+		Brightness = 2.5,
+	},
+	Night = {
+		Ambient = Color3.fromRGB(96, 107, 171),
+		OutdoorAmbient = Color3.fromRGB(45, 50, 80),
+		Brightness = 2,
+	},
+}
+
 return GameConfig
