@@ -491,7 +491,7 @@ local function claimPlot(player, data)
 	byPlayer[player] = entry
 	player:SetAttribute("PlotName", entry.Model.Name)
 	player:SetAttribute("Slots", capacity(data))
-	SpeedService.SetTreadmill(player, PlotBuilder.GetTreadmill(entry.Model))
+	SpeedService.SetTreadmill(player, PlotBuilder.GetTreadmillSurface(entry.Model))
 	PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(player))
 	renderPlot(entry)
 
@@ -666,6 +666,19 @@ function PlotService.Init()
 		if not floor then
 			warn("[PlotService] В участке " .. model.Name .. " нет детали Floor — пропускаем")
 		else
+			-- Подсказка автору: что из необязательных деталей не найдено внутри участка
+			local missing = {}
+			for _, name in ipairs({ "Spawn", "Sign", "Upgrade", "Treadmill" }) do
+				if not model:FindFirstChild(name, true) then
+					table.insert(missing, name)
+				end
+			end
+			if #missing > 0 then
+				warn("[PlotService] В участке " .. model.Name .. " не найдены детали: "
+					.. table.concat(missing, ", ")
+					.. ". Проверь, что они лежат ВНУТРИ модели участка и названы точно так.")
+			end
+
 			local entry = {
 				Model = model,
 				Floor = floor,

@@ -4,7 +4,9 @@
 --  1. Считает настоящую скорость персонажа (Humanoid.WalkSpeed) из статы "Скорость".
 --     Стата растёт бесконечно, а WalkSpeed растёт логарифмически и упирается в предел —
 --     иначе персонаж начнёт пролетать сквозь стены.
---  2. Беговая дорожка: пока игрок стоит на ней, стата растёт.
+--  2. Беговая дорожка: игрок встаёт на неё, прилипает к полотну, бежит на месте
+--     и получает скорость короткими шагами. Спрыгивает прыжком (пробел или
+--     кнопка прыжка на телефоне).
 --  3. Проверяет, не двигается ли игрок быстрее разрешённого, и возвращает назад.
 --
 -- Скорость меняется ТОЛЬКО через EconomyService.AddSpeed — этот сервис
@@ -13,7 +15,7 @@
 -- Другим сервисам:
 --   SpeedService.MarkTeleport(player)     -- честный телепорт, не считать нарушением
 --   SpeedService.AllowBurst(player, 1.5)  -- отталкивание боссом или мечом (этапы 5-6)
---   SpeedService.SetTreadmill(player, part)
+--   SpeedService.SetTreadmill(player, surface)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,9 +33,12 @@ local TrailService = require(script.Parent.TrailService)
 local S = GameConfig.Speed
 local T = GameConfig.Treadmill
 
+local popupEvent = Remotes.Event("SpeedPopup")
+
 local SpeedService = {}
 
-local treadmills = {}   -- [player] = деталь дорожки его участка
+local treadmills = {}   -- [player] = поверхность дорожки его участка (PlotBuilder.GetTreadmillSurface)
+local standing = {}     -- [player] = { Track, BlockedUntil, MustLeave }
 local tracking = {}     -- [player] = { Position, Strikes, BurstUntil }
 local walkSpeeds = {}   -- [player] = посчитанный сервером WalkSpeed
 
@@ -70,7 +75,9 @@ function SpeedService.Apply(player)
 	walkSpeeds[player] = walkSpeed
 	player:SetAttribute("WalkSpeed", walkSpeed)
 	if humanoid then
-		humanoid.WalkSpeed = walkSpeed
+		-- На дорожке игрок стоит на месте: скорость там всегда 0,
+		-- иначе начисление скорости каждые 0.2 секунды сбрасывало бы это обратно
+		humanoid.WalkSpeed = player:GetAttribute("OnTreadmill") and 0 or walkSpeed
 	end
 end
 
@@ -91,14 +98,17 @@ function SpeedService.GetTreadmillGain(player)
 	return Formulas.TreadmillGain(data.TreadmillLevel, SpeedService.TrainingMultiplier(player))
 end
 
-function SpeedService.SetTreadmill(player, part)
-	treadmills[player] = part
+function SpeedService.SetTreadmill(player, surface)
+	if not surface then
+		SpeedService.LeaveTreadmill(player)
+	end
+	treadmills[player] = surface
 end
 
 -- Стоит ли игрок на своей дорожке
 local function isOnTreadmill(player)
-	local part = treadmills[player]
-	if not part or not part.Parent then
+	local surface = treadmills[player]
+	if not surface then
 		return false
 	end
 	local character = player.Character
@@ -106,11 +116,112 @@ local function isOnTreadmill(player)
 	if not root then
 		return false
 	end
-	local offset = part.CFrame:PointToObjectSpace(root.Position)
-	return math.abs(offset.X) <= part.Size.X / 2 + 1
-		and math.abs(offset.Z) <= part.Size.Z / 2 + 1
+	local offset = surface.CFrame:PointToObjectSpace(root.Position)
+	return math.abs(offset.X) <= surface.Size.X / 2 + 1
+		and math.abs(offset.Z) <= surface.Size.Z / 2 + 1
 		and offset.Y > 0
 		and offset.Y <= T.StandHeight
+end
+
+---------------------------------------------------------------------
+-- Прилипание к дорожке и бег на месте
+---------------------------------------------------------------------
+
+local function stopAnimation(player)
+	local state = standing[player]
+	if state and state.Track then
+		state.Track:Stop(0.2)
+		state.Track = nil
+	end
+end
+
+local function playRunAnimation(player, humanoid)
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = humanoid.RigType == Enum.HumanoidRigType.R6
+		and T.RunAnimationR6
+		or T.RunAnimationR15
+
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+	animation:Destroy()
+	if not ok or not track then
+		warn("[SpeedService] Не удалось загрузить анимацию бега")
+		return nil
+	end
+	track.Priority = Enum.AnimationPriority.Action
+	track.Looped = true
+	track:Play(0.2)
+	track:AdjustSpeed(T.RunAnimationSpeed)
+	return track
+end
+
+-- Ставит игрока на полотно и включает бег на месте
+local function enterTreadmill(player)
+	local surface = treadmills[player]
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not surface or not humanoid or not root or humanoid.Health <= 0 then
+		return
+	end
+
+	-- Куда лицом: вдоль полотна, в ту сторону, куда игрок уже смотрел
+	local forward = surface.Forward
+	if root.CFrame.LookVector:Dot(forward) < 0 then
+		forward = -forward
+	end
+
+	-- Насколько поднять над полотном, чтобы ноги стояли ровно
+	local lift = math.max(humanoid.HipHeight + root.Size.Y / 2, 3)
+	local position = (surface.CFrame * CFrame.new(0, surface.Size.Y / 2 + lift, 0)).Position
+
+	root.CFrame = CFrame.lookAt(position, position + forward)
+	root.Anchored = true
+	humanoid.AutoRotate = false
+	humanoid.WalkSpeed = 0
+	SpeedService.MarkTeleport(player) -- это честный телепорт
+
+	local state = standing[player] or {}
+	state.Track = playRunAnimation(player, humanoid)
+	standing[player] = state
+	player:SetAttribute("OnTreadmill", true)
+end
+
+-- Снимает игрока с дорожки: спрыгнул, вышел, умер или потерял участок
+function SpeedService.LeaveTreadmill(player, jump)
+	local state = standing[player]
+	if not player:GetAttribute("OnTreadmill") and not (state and state.Track) then
+		return
+	end
+	stopAnimation(player)
+	player:SetAttribute("OnTreadmill", false)
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root then
+		root.Anchored = false
+	end
+	if humanoid then
+		humanoid.AutoRotate = true
+		if jump and humanoid.Health > 0 then
+			humanoid.Jump = true
+		end
+	end
+	SpeedService.Apply(player) -- вернуть нормальный WalkSpeed
+	SpeedService.MarkTeleport(player)
+
+	state = standing[player] or {}
+	-- Пока игрок не сойдёт с полотна, обратно не приклеиваем
+	state.MustLeave = true
+	state.BlockedUntil = os.clock() + T.ExitCooldown
+	standing[player] = state
 end
 
 function SpeedService.UpgradeTreadmill(player)
@@ -218,6 +329,9 @@ end
 ---------------------------------------------------------------------
 
 local function onCharacterAdded(player)
+	-- Новый персонаж не приклеен: забываем всё, что было с дорожкой
+	standing[player] = nil
+	player:SetAttribute("OnTreadmill", false)
 	SpeedService.MarkTeleport(player)
 	task.defer(SpeedService.Apply, player)
 end
@@ -252,13 +366,34 @@ end
 local function tick(deltaTime)
 	for _, player in ipairs(Players:GetPlayers()) do
 		if DataService.Get(player) then
-			if isOnTreadmill(player) then
-				local gain = SpeedService.GetTreadmillGain(player) * deltaTime
+			checkMovement(player, deltaTime)
+		end
+	end
+end
+
+-- Отдельный цикл дорожки: он частый (раз в 0.2 секунды), а проверка скорости нет
+local function treadmillTick()
+	for _, player in ipairs(Players:GetPlayers()) do
+		if DataService.Get(player) then
+			local state = standing[player] or {}
+			standing[player] = state
+			local onSurface = isOnTreadmill(player)
+
+			if not onSurface then
+				-- Сошёл с полотна: снова можно приклеиваться
+				state.MustLeave = false
+				if player:GetAttribute("OnTreadmill") then
+					SpeedService.LeaveTreadmill(player)
+				end
+			elseif player:GetAttribute("OnTreadmill") then
+				local gain = SpeedService.GetTreadmillGain(player)
 				if gain > 0 then
 					EconomyService.AddSpeed(player, gain)
+					popupEvent:FireClient(player, gain)
 				end
+			elseif not state.MustLeave and os.clock() >= (state.BlockedUntil or 0) then
+				enterTreadmill(player)
 			end
-			checkMovement(player, deltaTime)
 		end
 	end
 end
@@ -268,9 +403,16 @@ function SpeedService.Init()
 
 	Players.PlayerRemoving:Connect(function(player)
 		treadmills[player] = nil
+		standing[player] = nil
 		tracking[player] = nil
 		walkSpeeds[player] = nil
 	end)
+
+	-- Игрок нажал прыжок, чтобы сойти с дорожки
+	Remotes.Event("LeaveTreadmill").OnServerEvent:Connect(function(player)
+		SpeedService.LeaveTreadmill(player, true)
+	end)
+
 
 	PassService.PassGranted:Connect(function(player, passName)
 		if passName == "X2Speed" then
@@ -284,6 +426,16 @@ function SpeedService.Init()
 			local ok, err = pcall(tick, deltaTime)
 			if not ok then
 				warn("[SpeedService] Ошибка в цикле скорости: " .. tostring(err))
+			end
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(T.GainInterval)
+			local ok, err = pcall(treadmillTick)
+			if not ok then
+				warn("[SpeedService] Ошибка в цикле дорожки: " .. tostring(err))
 			end
 		end
 	end)
