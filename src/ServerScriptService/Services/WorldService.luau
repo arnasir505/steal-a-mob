@@ -296,6 +296,14 @@ local function groundUnder(box, x, z, ignore)
 	return nil
 end
 
+-- Пол под точкой: куда падает брошенное яйцо, где спит босс.
+-- Луч идёт чуть выше точки и вниз на depth студов. nil — пола нет.
+function WorldService.FindGround(position, ignore, depth)
+	local from = position + Vector3.new(0, 2, 0)
+	local result = workspace:Raycast(from, Vector3.new(0, -(depth or 60), 0), groundParams(ignore))
+	return result and result.Position or nil
+end
+
 -- Свободная точка для яйца. taken — уже занятые точки (Vector3).
 function WorldService.FindEggSpawn(biome, taken, ignore)
 	local minDistance = GameConfig.Egg.SpawnMinDistance

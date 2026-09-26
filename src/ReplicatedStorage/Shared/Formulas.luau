@@ -37,17 +37,37 @@ function Formulas.ClampWeight(weight)
 	return clamp(weight, W.Min, W.Max)
 end
 
--- Случайный вес яйца при спавне в биоме: лёгкие часто, тяжёлые редко
-function Formulas.RollSpawnWeight(rng)
+-- Самое тяжёлое яйцо, которое может появиться в биоме (MaxWeight из Config/Biomes)
+function Formulas.BiomeMaxWeight(biomeId)
+	local biome = biomeId and Biomes.Get(biomeId)
+	return Formulas.ClampWeight(biome and biome.MaxWeight or W.SpawnMaxWeight)
+end
+
+-- Случайный вес яйца при спавне в биоме: лёгкие часто, тяжёлые редко.
+-- biomeId необязателен: без него предел — GameConfig.Weight.SpawnMaxWeight.
+function Formulas.RollSpawnWeight(rng, biomeId)
 	local x = rng:NextNumber() ^ W.SpawnRollPower
-	local weight = 10 ^ (x * log10(W.SpawnMaxWeight))
+	local weight = 10 ^ (x * log10(Formulas.BiomeMaxWeight(biomeId)))
 	return math.floor(weight * 100) / 100 -- округляем до 0.01 кг
 end
 
--- Во сколько раз увеличить модель
-function Formulas.ModelScale(weight)
+-- Насколько модель выросла: 0 при 1 кг, 1 при максимальном весе.
+-- ModelScaleCurve решает, как долго модель остаётся маленькой.
+local function growthShare(weight)
 	local share = log10(Formulas.ClampWeight(weight)) / log10(W.Max)
-	return 1 + share * (W.MaxModelScale - 1)
+	return share ^ W.ModelScaleCurve
+end
+
+-- Во сколько раз увеличить модель моба. baseScale — размер при 1 кг
+-- (Scale из Config/Mobs), по умолчанию 1.
+function Formulas.ModelScale(weight, baseScale)
+	return (baseScale or 1) * (1 + (W.MaxModelScale - 1) * growthShare(weight))
+end
+
+-- То же для яйца (EggScale из Config/Mobs). Яйца растут до своего предела,
+-- потому что их носят над головой.
+function Formulas.EggModelScale(weight, baseScale)
+	return (baseScale or 1) * (1 + (W.EggMaxModelScale - 1) * growthShare(weight))
 end
 
 ---------------------------------------------------------------------
@@ -147,7 +167,7 @@ function Formulas.RollEgg(rng, biomeId)
 	return {
 		MobId = mobId,
 		Rarity = Formulas.RollRarity(rng, biomeId),
-		Weight = Formulas.RollSpawnWeight(rng),
+		Weight = Formulas.RollSpawnWeight(rng, biomeId),
 	}
 end
 

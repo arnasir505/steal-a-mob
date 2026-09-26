@@ -147,7 +147,7 @@ local function renderItem(entry, id, placed)
 		label.TextColor3 = Rarities.Get(placed.Item.Rarity).Color
 	end
 
-	local anchor = model.PrimaryPart
+	local anchor, reach = PlotBuilder.MakePromptAnchor(model)
 	local store = Instance.new("ProximityPrompt")
 	store.Name = "StorePrompt"
 	store.ActionText = "Store"
@@ -155,7 +155,7 @@ local function renderItem(entry, id, placed)
 	store.KeyboardKeyCode = Enum.KeyCode.E
 	store.GamepadKeyCode = Enum.KeyCode.ButtonX
 	store.RequiresLineOfSight = false
-	store.MaxActivationDistance = 5
+	store.MaxActivationDistance = reach
 	store.Parent = anchor
 	store.Triggered:Connect(function(player)
 		PlotService.Store(player, id, entry)
@@ -169,7 +169,7 @@ local function renderItem(entry, id, placed)
 	sell.KeyboardKeyCode = Enum.KeyCode.F
 	sell.GamepadKeyCode = Enum.KeyCode.ButtonY
 	sell.RequiresLineOfSight = false
-	sell.MaxActivationDistance = 5
+	sell.MaxActivationDistance = reach
 	sell.UIOffset = Vector2.new(0, 60)
 	sell.Parent = anchor
 	sell.Triggered:Connect(function(player)

@@ -20,6 +20,9 @@
 --   !round                 — сбросить раунд прямо сейчас
 --   !gates close / open    — закрыть или открыть ворота руками (проверить модель)
 --   !eggs                  — показать яйца, которые сейчас лежат в биомах
+--   !drop                  — бросить яйцо из рук (то же, что кнопка G)
+--   !boss                  — что делают боссы и убежишь ли ты от них
+--   !boss home             — все боссы на место и спать
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -47,6 +50,7 @@ local SpeedService = require(Services.SpeedService)
 local WorldService = require(Services.WorldService)
 local EggService = require(Services.EggService)
 local RoundService = require(Services.RoundService)
+local BossService = require(Services.BossService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -103,21 +107,22 @@ local function parseItemArgs(words)
 	mobId = mobId or randomMobId()
 	local biomeId = Mobs[mobId] and Mobs[mobId].Biome
 	rarity = rarity or Formulas.RollRarity(rng, biomeId)
-	weight = weight or Formulas.RollSpawnWeight(rng)
+	weight = weight or Formulas.RollSpawnWeight(rng, biomeId)
 	return mobId, rarity, weight
 end
 
 local function printFormulas()
 	print("--- Formulas ---")
-	for _, weight in ipairs({ 1, 10, 1000, 1000000, 100000000 }) do
+	for _, weight in ipairs({ 1, 2, 10, 100, 1000, 100000, 1000000, 100000000 }) do
 		local item = { MobId = "Chicken", Rarity = "Common", Weight = weight, Mutation = "None" }
 		print(string.format(
-			"%s: income %s/s, sell $%s, hatch %s, scale x%.2f, carry x%.2f, fuse chance %.4f%%",
+			"%s: income %s/s, sell $%s, hatch %s, scale x%.2f, egg x%.2f, carry x%.2f, fuse chance %.4f%%",
 			Format.Weight(weight),
 			Format.Number(Formulas.MobIncome(item)),
 			Format.Number(Formulas.MobSellPrice(item)),
 			Format.Time(Formulas.HatchTime(item)),
 			Formulas.ModelScale(weight),
+			Formulas.EggModelScale(weight),
 			Formulas.CarryMultiplier(weight),
 			Formulas.FuseUpgradeChance(weight) * 100
 		))
@@ -412,6 +417,16 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "drop" then
+		print("Бросил яйцо:", EggService.RequestDrop(player))
+	elseif command == "boss" then
+		if words[2] and string.lower(words[2]) == "home" then
+			BossService.ResetAll()
+		end
+		print("--- Боссы ---")
+		for _, line in ipairs(BossService.DebugLines(player)) do
+			print("  " .. line)
+		end
 	elseif command == "where" then
 		printWhere(player)
 	elseif command == "tp" then

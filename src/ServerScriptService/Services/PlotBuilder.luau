@@ -24,6 +24,10 @@
 --              без неё игрок встаёт вдоль длинной стороны полотна.
 --   Fences   — необязательно. Папка с моделями заборов: Fence0, Fence3, Fence7...
 --              Число в имени — с какого уровня улучшения показывать этот забор.
+--              Виден всегда только один: с самым большим числом, до которого
+--              дорос участок. Остальные на время убираются из мира целиком
+--              (вместе с текстурами и столкновениями). Забор может быть
+--              моделью, одной деталью или Union — неважно.
 --              Если папки нет, игра строит простой забор из деталей сама.
 --
 -- Отдельных деталей под слоты БОЛЬШЕ НЕ НУЖНО: игрок ставит яйцо в любом
@@ -193,29 +197,56 @@ local function buildSimpleFence(plotModel, floor, style)
 	fence.Parent = plotModel
 end
 
+-- Заборы автора каждого участка: [plotModel] = { Folder, List = { { Fence, MinLevel } } }.
+-- Список запоминаем один раз: спрятанный забор лежит вне папки Fences,
+-- и найти его там уже нельзя.
+local fenceSets = {}
+
+local function getFenceSet(plotModel)
+	local set = fenceSets[plotModel]
+	if set then
+		return set
+	end
+	local folder = plotModel:FindFirstChild("Fences")
+	if not folder then
+		return nil
+	end
+
+	set = { Folder = folder, List = {} }
+	local hasStart = false
+	for _, child in ipairs(folder:GetChildren()) do
+		local minLevel = tonumber(string.match(child.Name, "(%d+)$"))
+		if minLevel then
+			table.insert(set.List, { Fence = child, MinLevel = minLevel })
+			hasStart = hasStart or minLevel == 0
+		else
+			warn("[PlotBuilder] " .. child:GetFullName() .. ": в имени забора нет числа уровня"
+				.. " (нужно Fence0, Fence3...). Этот забор будет виден всегда.")
+		end
+	end
+	if #set.List > 0 and not hasStart then
+		warn("[PlotBuilder] В " .. folder:GetFullName() .. " нет Fence0 — на уровне 0 у участка не будет забора")
+	end
+	fenceSets[plotModel] = set
+	return set
+end
+
 -- Показывает забор, который соответствует уровню участка
 function PlotBuilder.UpdateFence(plotModel, level)
-	local fences = plotModel:FindFirstChild("Fences")
-	if fences then
-		-- Свои модели автора: Fence0, Fence3, Fence7... показываем подходящую
-		local bestChild, bestLevel
-		for _, child in ipairs(fences:GetChildren()) do
-			local minLevel = tonumber(string.match(child.Name, "(%d+)$"))
-			if minLevel and level >= minLevel and (not bestLevel or minLevel > bestLevel) then
-				bestChild, bestLevel = child, minLevel
+	local set = getFenceSet(plotModel)
+	if set and #set.List > 0 then
+		-- Свои заборы автора: Fence0, Fence3, Fence7... Берём тот, у которого
+		-- число самое большое, но не больше уровня участка.
+		local best
+		for _, entry in ipairs(set.List) do
+			if level >= entry.MinLevel and (not best or entry.MinLevel > best.MinLevel) then
+				best = entry
 			end
 		end
-		-- Показываем один забор, остальные прячем. Настоящую прозрачность
-		-- детали запоминаем один раз, чтобы не испортить модель автора.
-		for _, child in ipairs(fences:GetChildren()) do
-			for _, part in ipairs(child:GetDescendants()) do
-				if part:IsA("BasePart") then
-					if part:GetAttribute("BaseTransparency") == nil then
-						part:SetAttribute("BaseTransparency", part.Transparency)
-					end
-					part.Transparency = (child == bestChild) and part:GetAttribute("BaseTransparency") or 1
-				end
-			end
+		-- Нужный забор кладём в папку Fences, остальные убираем из мира совсем.
+		-- Прозрачность не годится: не прячет саму деталь, текстуры и столкновения.
+		for _, entry in ipairs(set.List) do
+			entry.Fence.Parent = (entry == best) and set.Folder or nil
 		end
 		return
 	end
@@ -474,7 +505,32 @@ function PlotBuilder.EnsureItemLabel(model)
 	-- где угодно, и подпись оказалась бы в ногах или в небе
 	local boxCFrame, boxSize = model:GetBoundingBox()
 	local above = (boxCFrame.Position.Y + boxSize.Y / 2) - anchor.Position.Y + 2
-	return makeLabel(anchor, "ItemInfo", UDim2.fromScale(8, 2), Vector3.new(0, above, 0), 90)
+	-- Над гигантским мобом подпись висит высоко: делаем её крупнее
+	-- и видимой издалека, иначе с земли её не прочитать
+	local grow = math.max(1, boxSize.Y / 12)
+	return makeLabel(anchor, "ItemInfo", UDim2.fromScale(8 * grow, 2 * grow),
+		Vector3.new(0, above, 0), 90 + boxSize.Y)
+end
+
+-- Точка для кнопок Store/Sell: у земли, в центре модели. У гигантского моба
+-- центр высоко в воздухе, и до кнопок на нём было бы не дотянуться.
+-- Возвращает Attachment и дальность кнопок.
+function PlotBuilder.MakePromptAnchor(model)
+	local anchor = model.PrimaryPart
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	local base = Vector3.new(boxCFrame.Position.X, boxCFrame.Position.Y - boxSize.Y / 2 + 2, boxCFrame.Position.Z)
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "PromptAnchor"
+	attachment.Position = anchor.CFrame:PointToObjectSpace(base)
+	attachment.Parent = anchor
+
+	-- Модели мобов без столкновений, так что к центру большого моба можно подойти.
+	-- Но слишком большая дальность мешала бы ставить яйца рядом: пока видна
+	-- чья-то кнопка, E значит "убрать", а не "поставить".
+	local radius = math.max(boxSize.X, boxSize.Z) / 2
+	local reach = P.ItemPromptDistance + math.min(radius, P.ItemPromptExtraMax)
+	return attachment, reach
 end
 
 ---------------------------------------------------------------------
@@ -538,9 +594,17 @@ function PlotBuilder.MakeItemModel(item, kind)
 		return nil
 	end
 
-	-- Размер растёт с весом медленно (логарифмически)
+	-- Размер растёт с весом медленно (логарифмически).
+	-- Умножаем на текущий масштаб модели: если автор увеличил её инструментом
+	-- Scale в Studio, ScaleTo(1) вернул бы исходный размер и сбросил его работу.
+	local scale
+	if kind == "Egg" then
+		scale = Formulas.EggModelScale(item.Weight, mob and mob.EggScale)
+	else
+		scale = Formulas.ModelScale(item.Weight, mob and mob.Scale)
+	end
 	local ok = pcall(function()
-		model:ScaleTo(Formulas.ModelScale(item.Weight))
+		model:ScaleTo(model:GetScale() * scale)
 	end)
 	if not ok then
 		warn("[PlotBuilder] Не удалось изменить размер модели " .. tostring(modelName))

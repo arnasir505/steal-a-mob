@@ -56,7 +56,7 @@ local function showPopup(amount)
 	label.TextScaled = true
 	label.Text = "+" .. Format.Number(amount)
 	label.TextColor3 = Color3.fromRGB(250, 9, 9)
-	label.TextStrokeTransparency = 0.3
+	label.TextStrokeTransparency = 0
 	label.Parent = gui
 
 	gui.Parent = character

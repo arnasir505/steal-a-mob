@@ -14,9 +14,11 @@
 --
 -- Другим сервисам:
 --   SpeedService.MarkTeleport(player)     -- честный телепорт, не считать нарушением
---   SpeedService.AllowBurst(player, 1.5)  -- отталкивание боссом или мечом (этапы 5-6)
+--   SpeedService.AllowBurst(player, 1.5)  -- разрешить короткий рывок
+--   SpeedService.Knockback(player, fromPosition, power) -- толчок боссом или мечом
 --   SpeedService.SetTreadmill(player, surface)
 
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -32,6 +34,7 @@ local TrailService = require(script.Parent.TrailService)
 
 local S = GameConfig.Speed
 local T = GameConfig.Treadmill
+local K = GameConfig.Knockback
 
 local popupEvent = Remotes.Event("SpeedPopup")
 
@@ -279,6 +282,54 @@ function SpeedService.AllowBurst(player, seconds)
 	if state then
 		state.BurstUntil = os.clock() + (seconds or 1)
 	end
+end
+
+-- Толчок: игрока отбрасывает от точки fromPosition. Урона нет.
+-- power — скорость толчка в студах в секунду (Boss.Knockback, позже — сила меча).
+--
+-- Физику персонажа считает компьютер самого игрока, поэтому просто поменять
+-- скорость с сервера нельзя — игрок тут же её перезапишет. Вместо этого сервер
+-- кладёт в персонажа LinearVelocity: он доходит до игрока и толкает его там.
+function SpeedService.Knockback(player, fromPosition, power)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not humanoid or humanoid.Health <= 0 or root.Anchored then
+		return
+	end
+
+	local away = root.Position - fromPosition
+	away = Vector3.new(away.X, 0, away.Z)
+	if away.Magnitude < 0.1 then
+		-- Стоят в одной точке: толкаем назад
+		local look = root.CFrame.LookVector
+		away = -Vector3.new(look.X, 0, look.Z)
+	end
+	if away.Magnitude < 0.1 then
+		away = Vector3.new(0, 0, 1)
+	end
+	local velocity = away.Unit * power + Vector3.new(0, power * K.UpShare, 0)
+
+	-- Прошлый толчок убираем, чтобы толчки не складывались
+	local old = root:FindFirstChild("Knockback")
+	if old then
+		old:Destroy()
+	end
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "Knockback"
+	attachment.Parent = root
+
+	local mover = Instance.new("LinearVelocity")
+	mover.Attachment0 = attachment
+	mover.RelativeTo = Enum.ActuatorRelativeTo.World
+	mover.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	mover.VectorVelocity = velocity
+	mover.MaxForce = math.huge
+	mover.Parent = attachment
+
+	-- Толчок быстрее обычного бега — проверка скорости не должна считать это читерством
+	SpeedService.AllowBurst(player, K.Time + 1.5)
+	Debris:AddItem(attachment, K.Time)
 end
 
 local function checkMovement(player, deltaTime)
