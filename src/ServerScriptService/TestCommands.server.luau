@@ -129,8 +129,8 @@ local function printFormulas()
 	end
 	for _, speed in ipairs({ 1, 10, 100, 1000, 1e6, 1e9, 1e12, 1e15, 1e18, 1e21 }) do
 		local walkSpeed = Formulas.WalkSpeed(speed)
-		print(string.format("Speed %-8s -> WalkSpeed %5.0f  (%.1f студа за кадр, погоня +-%.0f)",
-			Format.Number(speed), walkSpeed, walkSpeed / 60, Formulas.ChaseDelta(walkSpeed)))
+		print(string.format("Speed %-8s -> WalkSpeed %5.0f  (%.1f студа за кадр)",
+			Format.Number(speed), walkSpeed, walkSpeed / 60))
 	end
 	print("Random egg weights:", Formulas.RollSpawnWeight(rng), Formulas.RollSpawnWeight(rng), Formulas.RollSpawnWeight(rng))
 	print("Offline 3 days at 10/s:", Format.Number(Formulas.OfflineIncome(10, 3 * 86400)))

@@ -35,7 +35,7 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Farmer",
 			ModelName = "Farmer",
-			Speed = 7,
+			Speed = 5,
 			Knockback = 60,
 			TurnDegrees = 0,
 		},

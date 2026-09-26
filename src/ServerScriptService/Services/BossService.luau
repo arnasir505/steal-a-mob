@@ -5,9 +5,10 @@
 --    на чужие яйца не реагирует;
 --  * гонится за тем, у кого яйцо его биома реже. Если позже кто-то взял
 --    яйцо ещё реже — переключается на него;
---  * исход погони решают статы: если эффективная скорость игрока
---    (стата x замедление от яйца) >= скорости босса, босс бежит чуть медленнее
---    игрока, иначе чуть быстрее (Formulas.BossChaseWalkSpeed);
+--  * бежит со своей постоянной скоростью: Speed из Config/Biomes переводится
+--    в WalkSpeed той же формулой, что и стата игрока (Formulas.BossWalkSpeed).
+--    Эффективная скорость игрока (стата x замедление от яйца) >= Speed босса —
+--    игрок убежит, меньше — босс догонит;
 --  * догнал в своём биоме — отбирает яйцо, кладёт туда, где оно появилось,
 --    толкает игрока и идёт спать;
 --  * догнал за пределами биома — только толкает и идёт спать. Яйцо остаётся
@@ -29,8 +30,14 @@
 --     и Humanoid и скрепит все детали. Перёд босса — сторона Front у PrimaryPart.
 --     Если босс бежит боком или спиной, поставь Boss.TurnDegrees = 90, -90 или 180;
 --   * готовый риг (внутри есть Humanoid и HumanoidRootPart) — берётся как есть.
---     В риг можно положить анимации: объекты Animation с именами Sleep, Run
---     и Walk — они будут проигрываться сами.
+--     Анимации кладутся в риг по состояниям: папка (или StringValue) с именем
+--     Sleep, Run или Walk, а в ней объекты Animation с любыми именами.
+--     Если анимаций в папке несколько, каждый раз берётся случайная.
+--     Можно и без папок: объект Animation с именем Sleep, Run или Walk.
+--     Нет своей анимации или она не загрузилась (чужая, нет доступа) —
+--     берётся стандартная анимация Roblox (GameConfig.Boss.DefaultAnimations).
+--     Скрипт Animate внутри босса (стандартный скрипт Roblox) выключается:
+--     он сам включает бег при любом движении и спорил бы с этими анимациями.
 --
 -- Босс проходит сквозь стены и игроков: у его деталей выключены столкновения,
 -- а по земле он ходит за счёт Humanoid. Поэтому на препятствиях он не застревает.
@@ -120,50 +127,156 @@ local function setStatus(boss, text, color)
 end
 
 ---------------------------------------------------------------------
--- Анимации (только если автор положил их в риг)
+-- Анимации: свои из рига, а если их нет или они не загрузились — стандартные Roblox
 ---------------------------------------------------------------------
 
+local ANIMATION_STATES = { "Sleep", "Run", "Walk" }
+
+-- Для какого состояния анимация: сначала смотрим на папку, в которой она лежит
+-- (Animate.Run.RunAnim -> Run), потом на её собственное имя (Run -> Run)
+local function animationKey(animation)
+	local parent = animation.Parent
+	return (parent and ANIMATION_KEYS[string.lower(parent.Name)])
+		or ANIMATION_KEYS[string.lower(animation.Name)]
+end
+
+local function loadTrack(animator, animation)
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+	if ok and track then
+		track.Looped = true
+		return track
+	end
+	return nil
+end
+
+-- Стандартная анимация Roblox для состояния. Только для рига с суставами:
+-- модели из приваренных деталей двигать нечем.
+local function loadDefaultTrack(boss, key)
+	if not boss.Model:FindFirstChildWhichIsA("Motor6D", true) then
+		return nil
+	end
+	local rig = boss.Humanoid.RigType == Enum.HumanoidRigType.R6 and "R6" or "R15"
+	local id = C.DefaultAnimations[rig] and C.DefaultAnimations[rig][key]
+	if not id then
+		return nil
+	end
+	local animation = Instance.new("Animation")
+	animation.AnimationId = id
+	local track = loadTrack(boss.Animator, animation)
+	animation:Destroy()
+	return track
+end
+
+-- key = "Sleep", "Run", "Walk" или nil (остановить всё).
+-- force = true — перезапустить, даже если это состояние уже играет.
+local function playAnimation(boss, key, force)
+	if boss.PlayingKey == key and not force then
+		return
+	end
+	boss.PlayingKey = key
+	if boss.PlayingTrack then
+		boss.PlayingTrack:Stop(0.2)
+		boss.PlayingTrack = nil
+	end
+	local list = key and boss.Tracks[key]
+	if key == "Walk" and (not list or #list == 0) then
+		list = boss.Tracks.Run -- нечем идти шагом — идёт с анимацией бега
+	end
+	if list and #list > 0 then
+		local track = list[math.random(1, #list)]
+		track:Play(0.2)
+		boss.PlayingTrack = track
+	end
+end
+
+-- Своя анимация может не загрузиться: например, она принадлежит чужому
+-- аккаунту. LoadAnimation об этом не сообщает, но у такой дорожки длина так
+-- и остаётся 0. Ждём немного и, если не загрузилась, ставим стандартную.
+local function watchLoading(boss, key, track, source)
+	local tracks = boss.Tracks
+	task.spawn(function()
+		local deadline = os.clock() + C.AnimationLoadTimeout
+		while track.Length == 0 and os.clock() < deadline do
+			task.wait(0.25)
+		end
+		-- Загрузилась, или босса уже пересоздали — делать нечего
+		if track.Length > 0 or boss.Tracks ~= tracks then
+			return
+		end
+
+		local list = tracks[key]
+		local index = list and table.find(list, track)
+		if index then
+			table.remove(list, index)
+		end
+		track:Stop(0)
+		track:Destroy()
+
+		local replaced = "ничего"
+		if not list or #list == 0 then
+			local default = loadDefaultTrack(boss, key)
+			if default then
+				tracks[key] = { default }
+				replaced = "стандартная анимация Roblox"
+			end
+		end
+		warn("[BossService] " .. boss.Name .. ": анимация " .. source .. " не загрузилась"
+			.. " (скорее всего, она чужая и у игры нет к ней доступа). Вместо неё: " .. replaced
+			.. ". Удали её из модели или замени своей, чтобы не было ошибки в Output.")
+
+		if boss.PlayingTrack == track then
+			boss.PlayingTrack = nil
+			playAnimation(boss, boss.PlayingKey, true)
+		end
+	end)
+end
+
+-- boss.Tracks[key] = список дорожек: в одной папке может быть несколько анимаций
 local function loadAnimations(boss)
 	boss.Tracks = {}
 	boss.PlayingKey = nil
+	boss.PlayingTrack = nil
 	local animator = boss.Humanoid:FindFirstChildOfClass("Animator")
 	if not animator then
 		animator = Instance.new("Animator")
 		animator.Parent = boss.Humanoid
 	end
+	boss.Animator = animator
+	-- Останавливаем всё, что успел включить кто-то другой (скрипт Animate)
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		track:Stop(0)
+	end
+
+	-- Свои анимации из рига
+	local own = 0
 	for _, animation in ipairs(boss.Model:GetDescendants()) do
-		local key = animation:IsA("Animation") and ANIMATION_KEYS[string.lower(animation.Name)]
-		if key and not boss.Tracks[key] then
-			local ok, track = pcall(function()
-				return animator:LoadAnimation(animation)
-			end)
-			if ok and track then
-				track.Looped = true
-				boss.Tracks[key] = track
-			else
-				warn("[BossService] Не удалось загрузить анимацию " .. animation:GetFullName())
+		local key = animation:IsA("Animation") and animationKey(animation)
+		if key then
+			local track = loadTrack(animator, animation)
+			if track then
+				boss.Tracks[key] = boss.Tracks[key] or {}
+				table.insert(boss.Tracks[key], track)
+				own = own + 1
+				watchLoading(boss, key, track, animation:GetFullName())
 			end
 		end
 	end
-	-- Нет отдельной анимации ходьбы — идёт домой той же, что и бежит
-	boss.Tracks.Walk = boss.Tracks.Walk or boss.Tracks.Run
-end
 
--- key = "Sleep", "Run", "Walk" или nil (остановить всё)
-local function playAnimation(boss, key)
-	if boss.PlayingKey == key then
-		return
-	end
-	boss.PlayingKey = key
-	local wanted = key and boss.Tracks[key]
-	for _, track in pairs(boss.Tracks) do
-		if track ~= wanted and track.IsPlaying then
-			track:Stop(0.2)
+	-- Чего нет — берём стандартное
+	local defaults = {}
+	for _, key in ipairs(ANIMATION_STATES) do
+		if not boss.Tracks[key] then
+			local track = loadDefaultTrack(boss, key)
+			if track then
+				boss.Tracks[key] = { track }
+				table.insert(defaults, key)
+			end
 		end
 	end
-	if wanted and not wanted.IsPlaying then
-		wanted:Play(0.2)
-	end
+	print(string.format("[BossService] %s: своих анимаций %d, стандартные для: %s",
+		boss.Name, own, #defaults > 0 and table.concat(defaults, ", ") or "нет"))
 end
 
 ---------------------------------------------------------------------
@@ -280,6 +393,14 @@ local function prepareModel(model, turnDegrees)
 		humanoid.RigType = Enum.HumanoidRigType.R15 -- у R15 HipHeight считается от низа корня
 		humanoid.HipHeight = boxSize.Y / 2 - root.Size.Y / 2
 		humanoid.Parent = model
+	end
+
+	-- Стандартный скрипт Animate сам включает бег, как только Humanoid двигается,
+	-- и спорил бы с нашими анимациями. Анимации берём из его папок, а сам скрипт выключаем.
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BaseScript") and descendant.Name == "Animate" then
+			descendant.Enabled = false
+		end
 	end
 
 	for _, part in ipairs(model:GetDescendants()) do
@@ -406,11 +527,21 @@ local function startChase(boss)
 	playAnimation(boss, "Run")
 end
 
+-- Постоянная скорость босса в погоне
+local function chaseWalkSpeed(boss)
+	return Formulas.BossWalkSpeed(boss.Config.Speed or 1)
+end
+
+-- Домой идёт шагом
+local function returnWalkSpeed(boss)
+	return chaseWalkSpeed(boss) * C.ReturnSpeedShare
+end
+
 local function goHome(boss, now)
 	boss.State = "Return"
 	boss.Target = nil
 	boss.ReturnStartedAt = now
-	boss.Humanoid.WalkSpeed = C.ReturnWalkSpeed
+	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
 	boss.Humanoid:MoveTo(boss.BedPosition)
 	setStatus(boss, "...", SLEEP_COLOR)
 	playAnimation(boss, "Walk")
@@ -424,7 +555,7 @@ local function walkHome(boss, now)
 		return
 	end
 	-- MoveTo сам сдаётся через 8 секунд, поэтому повторяем
-	boss.Humanoid.WalkSpeed = C.ReturnWalkSpeed
+	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
 	boss.Humanoid:MoveTo(boss.BedPosition)
 end
 
@@ -462,13 +593,8 @@ local function pickTarget(boss)
 	return best
 end
 
--- Скорость босса считается от статов цели, а не от его собственной
 local function chase(boss, player, root)
-	boss.Humanoid.WalkSpeed = Formulas.BossChaseWalkSpeed(
-		SpeedService.GetEffectiveSpeed(player),
-		boss.Config.Speed or 1,
-		SpeedService.GetWalkSpeed(player)
-	)
+	boss.Humanoid.WalkSpeed = chaseWalkSpeed(boss)
 	boss.Humanoid:MoveTo(root.Position)
 	setStatus(boss, "Chasing " .. player.DisplayName, ALERT_COLOR)
 end
@@ -647,16 +773,16 @@ end
 function BossService.DebugLines(player)
 	local lines = {}
 	for _, boss in ipairs(bosses) do
-		local walkSpeed = boss.Humanoid and boss.Humanoid.WalkSpeed or 0
 		table.insert(lines, string.format(
-			"%s (%s): %s, цель: %s, WalkSpeed %.0f, скорость босса %s, ловит с %.1f студов",
+			"%s (%s): %s, цель: %s, скорость %s (WalkSpeed в погоне %.1f, домой %.1f), ловит с %.1f студов",
 			boss.Name, boss.Id, boss.State,
 			boss.Target and boss.Target.Name or "нет",
-			walkSpeed, tostring(boss.Config.Speed), boss.CatchRadius))
+			tostring(boss.Config.Speed), chaseWalkSpeed(boss), returnWalkSpeed(boss), boss.CatchRadius))
 		if player then
 			local mine = SpeedService.GetEffectiveSpeed(player)
-			table.insert(lines, string.format("  твоя эффективная скорость %.1f -> %s",
-				mine, mine >= (boss.Config.Speed or 1) and "убежишь" or "догонит"))
+			table.insert(lines, string.format("  твоя эффективная скорость %.1f (WalkSpeed %.1f) -> %s",
+				mine, SpeedService.GetWalkSpeed(player),
+				mine >= (boss.Config.Speed or 1) and "убежишь" or "догонит"))
 		end
 	end
 	if #lines == 0 then

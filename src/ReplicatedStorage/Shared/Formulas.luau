@@ -193,19 +193,12 @@ function Formulas.WalkSpeed(effectiveSpeed)
 	return math.min(S.MaxWalkSpeed, S.BaseWalkSpeed + log10(effectiveSpeed) * S.WalkSpeedPerLog)
 end
 
--- Реальная скорость босса в погоне: исход решают статы, а не реальная скорость.
--- Разница берётся в процентах от скорости игрока, чтобы на больших скоростях
--- босс отставал (или догонял) заметно, а не по 2 студа в секунду.
-function Formulas.ChaseDelta(playerWalkSpeed)
-	return math.max(S.ChaseSpeedDelta, playerWalkSpeed * S.ChaseSpeedPercent)
-end
-
-function Formulas.BossChaseWalkSpeed(playerEffectiveSpeed, bossSpeed, playerWalkSpeed)
-	local delta = Formulas.ChaseDelta(playerWalkSpeed)
-	if playerEffectiveSpeed >= bossSpeed then
-		return math.max(1, playerWalkSpeed - delta) -- игрок убегает
-	end
-	return playerWalkSpeed + delta -- босс догоняет
+-- Реальная скорость босса в погоне. Она постоянная и от игрока не зависит.
+-- Speed босса (Config/Biomes) — в тех же единицах, что и стата игрока,
+-- и переводится в WalkSpeed той же формулой. Поэтому исход погони решают
+-- статы: эффективная скорость игрока >= Speed босса — убежит, меньше — догонят.
+function Formulas.BossWalkSpeed(bossSpeed)
+	return Formulas.WalkSpeed(bossSpeed)
 end
 
 ---------------------------------------------------------------------
