@@ -470,8 +470,11 @@ function PlotBuilder.EnsureItemLabel(model)
 	if label then
 		return label
 	end
-	local height = model:GetExtentsSize().Y
-	return makeLabel(anchor, "ItemInfo", UDim2.fromScale(8, 2), Vector3.new(0, height / 2 + 2.5, 0), 90)
+	-- Высоту подписи считаем от настоящего верха модели: PrimaryPart может быть
+	-- где угодно, и подпись оказалась бы в ногах или в небе
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	local above = (boxCFrame.Position.Y + boxSize.Y / 2) - anchor.Position.Y + 2
+	return makeLabel(anchor, "ItemInfo", UDim2.fromScale(8, 2), Vector3.new(0, above, 0), 90)
 end
 
 ---------------------------------------------------------------------
@@ -561,11 +564,37 @@ function PlotBuilder.MakeItemModel(item, kind)
 	return model
 end
 
+-- Ставит модель так, чтобы её НИЖНЯЯ ГРАНЬ стояла ровно на высоте groundY.
+--
+-- Почему нельзя просто поднять на половину высоты: PivotTo двигает точку привязки
+-- модели (её PrimaryPart), а он может быть где угодно — в голове, в лапе, сбоку.
+-- Поэтому сначала ставим модель с нужным поворотом, потом меряем, где у неё
+-- на самом деле низ, и поднимаем ровно на разницу.
+local function restOnGround(model, cframe, groundY)
+	model:PivotTo(cframe)
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	local bottom = boxCFrame.Position.Y - boxSize.Y / 2
+	model:PivotTo(model:GetPivot() + Vector3.new(0, groundY - bottom, 0))
+end
+
 -- Ставит модель на участок: x, z — координаты от центра пола, yaw — поворот
 function PlotBuilder.PlaceModel(model, floor, x, z, yaw)
-	local height = model:GetExtentsSize().Y
-	local base = floor.CFrame * CFrame.new(x, floor.Size.Y / 2 + height / 2, z)
-	model:PivotTo(base * CFrame.Angles(0, yaw or 0, 0))
+	local groundY = (floor.CFrame * CFrame.new(0, floor.Size.Y / 2, 0)).Position.Y
+	local spot = (floor.CFrame * CFrame.new(x, 0, z)).Position
+	local rotation = floor.CFrame - floor.CFrame.Position
+	restOnGround(model, CFrame.new(spot) * rotation * CFrame.Angles(0, yaw or 0, 0), groundY)
+end
+
+-- Ставит модель на землю в мировой точке (яйца в биомах)
+function PlotBuilder.PlaceOnGround(model, position, yaw)
+	restOnGround(model, CFrame.new(position) * CFrame.Angles(0, yaw or 0, 0), position.Y)
+end
+
+-- Ставит модель так, чтобы её ЦЕНТР оказался в точке (яйцо над головой игрока)
+function PlotBuilder.CenterAt(model, position)
+	model:PivotTo(CFrame.new(position))
+	local boxCFrame = model:GetBoundingBox()
+	model:PivotTo(model:GetPivot() + (position - boxCFrame.Position))
 end
 
 return PlotBuilder

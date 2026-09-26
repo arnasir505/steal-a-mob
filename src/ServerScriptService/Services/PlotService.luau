@@ -473,6 +473,15 @@ local function teleportToPlot(player, entry, character)
 	end
 end
 
+-- Отправить игрока на свой участок (сброс раунда, появление персонажа)
+function PlotService.SendHome(player)
+	local entry = byPlayer[player]
+	local character = player.Character
+	if entry and character then
+		teleportToPlot(player, entry, character)
+	end
+end
+
 local function claimPlot(player, data)
 	local entry
 	for _, candidate in ipairs(plots) do

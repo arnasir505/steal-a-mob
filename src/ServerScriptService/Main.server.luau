@@ -12,7 +12,10 @@ local EconomyService = require(Services.EconomyService)
 local InventoryService = require(Services.InventoryService)
 local TrailService = require(Services.TrailService)
 local SpeedService = require(Services.SpeedService)
+local WorldService = require(Services.WorldService)
 local PlotService = require(Services.PlotService)
+local EggService = require(Services.EggService)
+local RoundService = require(Services.RoundService)
 local TimeChangeService = require(Services.TimeChangeService)
 
 -- Ремоуты создаём заранее, чтобы клиент их дождался
@@ -24,7 +27,12 @@ EconomyService.Init()
 InventoryService.Init()
 TrailService.Init()
 SpeedService.Init()
+
+-- Карта: safe zone и биомы. Должна читаться до участков и яиц.
+WorldService.Init()
 PlotService.Init()
+EggService.Init()
+RoundService.Init()
 TimeChangeService.Init()
 
 -- 2. DataService запускаем последним, чтобы никто не пропустил загрузку игрока

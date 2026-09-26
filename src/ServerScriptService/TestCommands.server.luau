@@ -17,6 +17,11 @@
 --   !trail BlueTrail       — купить трейл (без имени — список трейлов)
 --   !equip BlueTrail       — надеть трейл (!equip off — снять)
 --   !speedinfo             — показать, из чего складывается скорость
+--   !round                 — сбросить раунд прямо сейчас
+--   !gates close / open    — закрыть или открыть ворота руками (проверить модель)
+--   !eggs                  — показать яйца, которые сейчас лежат в биомах
+--   !where                 — где я: биом или safe zone
+--   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
 --   !time stop             — остановить смену дня и ночи (!time go — запустить)
 --   !data                  — вывести все данные игрока в Output
@@ -39,6 +44,9 @@ local EconomyService = require(Services.EconomyService)
 local InventoryService = require(Services.InventoryService)
 local PlotService = require(Services.PlotService)
 local SpeedService = require(Services.SpeedService)
+local WorldService = require(Services.WorldService)
+local EggService = require(Services.EggService)
+local RoundService = require(Services.RoundService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -213,6 +221,65 @@ local function printTrails(player)
 	end
 end
 
+local function printEggs()
+	print("--- Яйца в мире (раунд кончится через " .. Format.Time(RoundService.GetSecondsLeft()) .. ") ---")
+	local list = EggService.GetActive()
+	if #list == 0 then
+		print("  пусто")
+	end
+	for _, egg in ipairs(list) do
+		print(string.format("  #%s %s в биоме %s%s",
+			egg.Id,
+			InventoryService.Describe(egg.Item),
+			egg.BiomeId,
+			egg.Carrier and (" — несёт " .. egg.Carrier.Name) or ""))
+	end
+end
+
+local function printWhere(player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local biome = WorldService.GetPlayerBiome(player)
+	if WorldService.IsPlayerInSafeZone(player) then
+		print(player.Name .. ": в safe zone")
+	elseif biome then
+		print(player.Name .. ": в биоме " .. biome.Id)
+	else
+		print(player.Name .. ": ни в safe zone, ни в биоме")
+	end
+	for _, line in ipairs(WorldService.DebugReport(root.Position)) do
+		print("  " .. line)
+	end
+end
+
+local function teleportTo(player, word)
+	local character = player.Character
+	if not character then
+		return
+	end
+	if word == nil or string.lower(word) == "home" then
+		PlotService.SendHome(player)
+		return
+	end
+	local biome
+	for _, candidate in ipairs(WorldService.GetBiomes()) do
+		if string.lower(candidate.Id) == string.lower(word) then
+			biome = candidate
+			break
+		end
+	end
+	if not biome then
+		print("Биом не найден:", word)
+		return
+	end
+	local box = biome.Boxes[1]
+	character:PivotTo(box.CFrame * CFrame.new(0, -box.Size.Y / 2 + 5, 0))
+	SpeedService.MarkTeleport(player)
+end
+
 local function printBackpack(player)
 	local data = DataService.Get(player)
 	if not data then
@@ -336,6 +403,19 @@ local function onChatted(player, message)
 		printSpeedInfo(player)
 	elseif command == "speedinfo" then
 		printSpeedInfo(player)
+	elseif command == "round" then
+		RoundService.ForceReset()
+		print("Раунд сброшен")
+	elseif command == "gates" then
+		local close = words[2] == nil or string.lower(words[2]) ~= "open"
+		WorldService.SetGatesClosed(close)
+		print("Ворота " .. (close and "закрыты" or "открыты"))
+	elseif command == "eggs" then
+		printEggs()
+	elseif command == "where" then
+		printWhere(player)
+	elseif command == "tp" then
+		teleportTo(player, words[2])
 	elseif command == "bag" then
 		printBackpack(player)
 	elseif command == "plot" then
