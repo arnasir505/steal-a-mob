@@ -30,6 +30,13 @@
 --   !index reset           — очистить индекс и забрать мечи (проверить награду заново)
 --   !fuse                  — синтез без машины: 3 самых дешёвых моба одного вида из рюкзака
 --   !fuse Chicken          — то же, но только из Куриц
+--   !friends 2             — притвориться, что на сервере 2 друга (!friends off — по-настоящему)
+--   !daily                 — календарь: сезон, сколько забрано, следующая награда
+--   !daily claim           — забрать сегодняшнюю награду
+--   !daily next            — притвориться, что наступил новый день, и забрать награду
+--   !daily skip 4          — сдвинуть время на 4 дня (например, до начала сезона)
+--   !daily reset           — начать календарь сезона заново
+--   !top                   — обновить общую таблицу лидеров и показать её
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -62,6 +69,9 @@ local RagdollService = require(Services.RagdollService)
 local SwordService = require(Services.SwordService)
 local IndexService = require(Services.IndexService)
 local FuseService = require(Services.FuseService)
+local FriendsService = require(Services.FriendsService)
+local DailyService = require(Services.DailyService)
+local LeaderboardService = require(Services.LeaderboardService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -223,7 +233,8 @@ local function printSpeedInfo(player)
 	print("  WalkSpeed:        " .. string.format("%.1f", SpeedService.GetWalkSpeed(player))
 		.. " (предел " .. GameConfig.Speed.MaxWalkSpeed .. ")")
 	print("  дорожка ур." .. data.TreadmillLevel .. ": +" .. Format.Number(SpeedService.GetTreadmillGain(player)) .. "/сек"
-		.. " (трейл x" .. TrailService.GetMultiplier(player) .. ")")
+		.. " (трейл x" .. TrailService.GetMultiplier(player)
+		.. ", друзья x" .. string.format("%.1f", 1 + FriendsService.GetBonus(player)) .. ")")
 	print("  трейл:            " .. (data.EquippedTrail ~= "" and data.EquippedTrail or "нет"))
 end
 
@@ -460,6 +471,40 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "friends" then
+		local word = words[2] and string.lower(words[2])
+		if word == "off" then
+			FriendsService.SetTestCount(player, nil)
+		elseif number then
+			FriendsService.SetTestCount(player, math.max(0, math.floor(number)))
+		end
+		print(string.format("Друзей на сервере: %d, бонус +%d%% к доходу и дорожке",
+			FriendsService.GetCount(player), math.floor(FriendsService.GetBonus(player) * 100 + 0.5)))
+	elseif command == "daily" then
+		local word = words[2] and string.lower(words[2])
+		if word == "claim" then
+			DailyService.Claim(player)
+		elseif word == "next" then
+			DailyService.AllowAgainForTesting(player)
+			DailyService.Claim(player)
+		elseif word == "skip" then
+			DailyService.SkipDays(tonumber(words[3]) or 1)
+		elseif word == "reset" then
+			DailyService.ResetForTesting(player)
+		end
+		print("--- Daily ---")
+		for _, line in ipairs(DailyService.DebugLines(player)) do
+			print("  " .. line)
+		end
+	elseif command == "top" then
+		print("--- Top income / s (все серверы) ---")
+		local top = LeaderboardService.Update()
+		if #top == 0 then
+			print("  пусто (или нет доступа к DataStore — см. предупреждение выше)")
+		end
+		for _, entry in ipairs(top) do
+			print(string.format("  #%d %s — $%s/s", entry.Rank, entry.Name, Format.Number(entry.Income)))
+		end
 	elseif command == "fuse" then
 		local mobId = words[2] and findKey(Mobs, words[2])
 		if words[2] and not mobId then

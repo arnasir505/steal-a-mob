@@ -3,11 +3,14 @@
 -- За один день можно забрать только одну награду.
 -- Когда сезон заканчивается, незабранные награды сгорают, начинается новый календарь.
 --
+-- Новый день — в 00:00 UTC (GameConfig.Daily). Между сезонами календаря нет.
+--
 -- Типы наград:
 --   { Type = "Money", Amount = 1000 }
 --   { Type = "Speed", Amount = 500 }
---   { Type = "Egg",   MobId = "Cow", Weight = 5 }
---   { Type = "Trail", TrailId = "Season1Trail" }
+--   { Type = "Egg",   MobId = "Cow", Weight = 5, Rarity = "Rare" }        -- Rarity необязательно (Common)
+--   { Type = "Mob",   MobId = "Cow", Weight = 5, Rarity = "Rare", Mutation = "Golden" }
+--   { Type = "Trail", TrailId = "Season1Trail" }  -- надевается сам, если лучше надетого
 
 local Seasons = {}
 

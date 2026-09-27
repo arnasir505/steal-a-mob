@@ -105,7 +105,8 @@ local function recalcIncome(player)
 	if not data then
 		return 0
 	end
-	local income = EconomyService.CalculateBaseIncome(data) * EconomyService.GetMoneyMultiplier(player)
+	-- Геймпасс x2 деньги и бонус друзей
+	local income = EconomyService.CalculateBaseIncome(data) * EconomyService.GetIncomeMultiplier(player)
 	EconomyService.SetIncomePerSecond(player, income)
 	return income
 end

@@ -88,9 +88,10 @@ end
 -- Беговая дорожка
 ---------------------------------------------------------------------
 
--- Множитель тренировки: трейл x геймпасс. Бонус друзей добавится на этапе 9.
+-- Множитель тренировки: трейл x геймпасс x бонус друзей (атрибут от FriendsService)
 function SpeedService.TrainingMultiplier(player)
-	return TrailService.GetMultiplier(player) * passMultiplier(player)
+	local friends = 1 + (player:GetAttribute("FriendsBonus") or 0)
+	return TrailService.GetMultiplier(player) * passMultiplier(player) * friends
 end
 
 function SpeedService.GetTreadmillGain(player)

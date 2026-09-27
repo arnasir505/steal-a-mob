@@ -6,6 +6,7 @@
 --   EconomyService.AddSpeed(player, 10)
 --   EconomyService.SetIncomePerSecond(player, 42)
 --   EconomyService.GetMoneyMultiplier(player) -> 1 или 2 (геймпасс x2 деньги)
+--   EconomyService.GetIncomeMultiplier(player) -> геймпасс x бонус друзей (для дохода в игре)
 --
 -- Клиент может читать значения через атрибуты игрока:
 --   player:GetAttribute("Money"), "Speed", "IncomePerSecond", "OfflineEarned"
@@ -140,8 +141,7 @@ function EconomyService.GetIncomePerSecond(player)
 	return incomePerSecond[player] or 0
 end
 
--- Множитель денег. Пока это только геймпасс x2;
--- бонус друзей добавим на этапе 9 (на офлайн-доход он не действует).
+-- Множитель денег от геймпасса x2. Им считается и офлайн-доход.
 -- Значение считается заранее, чтобы в цикле дохода не ходить в интернет каждую секунду.
 function EconomyService.RefreshMoneyMultiplier(player)
 	local multiplier = PassService.Has(player, "X2Money") and 2 or 1
@@ -151,6 +151,12 @@ end
 
 function EconomyService.GetMoneyMultiplier(player)
 	return moneyMultiplier[player] or 1
+end
+
+-- Множитель дохода, пока игрок в игре: геймпасс x бонус друзей.
+-- Бонус друзей кладёт в атрибут FriendsService. На офлайн-доход он не действует.
+function EconomyService.GetIncomeMultiplier(player)
+	return EconomyService.GetMoneyMultiplier(player) * (1 + (player:GetAttribute("FriendsBonus") or 0))
 end
 
 -- Офлайн-доход: без бонуса друзей, с геймпассом X2Money, максимум 2 дня.
