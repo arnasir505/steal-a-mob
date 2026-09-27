@@ -28,6 +28,8 @@
 --   !index                 — показать индекс мобов и награды
 --   !index Cow             — открыть одного моба (!index all — всех, чтобы получить мечи)
 --   !index reset           — очистить индекс и забрать мечи (проверить награду заново)
+--   !fuse                  — синтез без машины: 3 самых дешёвых моба одного вида из рюкзака
+--   !fuse Chicken          — то же, но только из Куриц
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -59,6 +61,7 @@ local BossService = require(Services.BossService)
 local RagdollService = require(Services.RagdollService)
 local SwordService = require(Services.SwordService)
 local IndexService = require(Services.IndexService)
+local FuseService = require(Services.FuseService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -457,6 +460,17 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "fuse" then
+		local mobId = words[2] and findKey(Mobs, words[2])
+		if words[2] and not mobId then
+			print("Нет такого моба:", words[2])
+		else
+			local item, upgraded = FuseService.FuseAuto(player, mobId)
+			if item then
+				print("Синтез:", InventoryService.Describe(item), upgraded and "(стал тяжелее!)" or "")
+			end
+			printBackpack(player)
+		end
 	elseif command == "index" then
 		local word = words[2] and string.lower(words[2])
 		if word == "all" then

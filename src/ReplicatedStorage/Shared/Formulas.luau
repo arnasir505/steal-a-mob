@@ -308,6 +308,40 @@ function Formulas.RollFuseResult(inputWeights, rng)
 	return maxWeight, false
 end
 
+-- Результат синтеза нескольких мобов одного вида (items — их предметы).
+-- Вес — как у самого тяжёлого, с шансом стать тяжелее (RollFuseResult).
+-- Редкость и мутация — по правилу Fuse.ResultTraits.
+-- Возвращает новый предмет и true, если моб стал тяжелее.
+function Formulas.RollFuse(items, rng)
+	local heaviest = items[1]
+	local weights = {}
+	for _, item in ipairs(items) do
+		table.insert(weights, item.Weight)
+		if item.Weight > heaviest.Weight then
+			heaviest = item
+		end
+	end
+	local weight, upgraded = Formulas.RollFuseResult(weights, rng)
+
+	local rarity, mutation = heaviest.Rarity, heaviest.Mutation or "None"
+	if Fuse.ResultTraits == "Best" then
+		for _, item in ipairs(items) do
+			if Rarities.Get(item.Rarity).IncomeMult > Rarities.Get(rarity).IncomeMult then
+				rarity = item.Rarity
+			end
+			if Mutations.Get(item.Mutation).IncomeMult > Mutations.Get(mutation).IncomeMult then
+				mutation = item.Mutation
+			end
+		end
+	end
+	return {
+		MobId = heaviest.MobId,
+		Rarity = rarity,
+		Weight = weight,
+		Mutation = mutation,
+	}, upgraded
+end
+
 ---------------------------------------------------------------------
 -- Разное
 ---------------------------------------------------------------------
