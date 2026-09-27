@@ -9,12 +9,11 @@
 --              можно только над ней. Обязательная деталь.
 --   Spawn    — деталь, где появляется хозяин участка.
 --   Sign     — необязательно. Имя владельца и число занятых мест.
+--              У таблички же покупают улучшение участка: над ней висит цена.
 --              Может быть деталью ИЛИ моделью. Если внутри есть своя надпись
 --              (SurfaceGui с TextLabel по имени "Label"), игра пишет в неё.
 --              Если своей надписи нет — вешает свою табличку над деталью.
---              То же правило у Upgrade и Treadmill.
---   Upgrade  — необязательно. Тумба, у которой покупают улучшение участка.
---              Если её нет, улучшение покупается у таблички Sign.
+--              То же правило у Treadmill.
 --   Treadmill— необязательно. Беговая дорожка: игрок встаёт на неё, прилипает,
 --              бежит на месте и получает скорость. Спрыгивает пробелом.
 --              Внутри можно сделать "Treadmill_Floor" (деталь или модель) —
@@ -91,7 +90,7 @@ local function makeLabel(parent, name, size, offset, maxDistance)
 end
 
 -- Деталь, к которой можно прицепить табличку или подсказку.
--- Автор может сделать Sign, Upgrade или Treadmill не деталью, а моделью —
+-- Автор может сделать Sign или Treadmill не деталью, а моделью —
 -- тогда берём её PrimaryPart (или первую деталь внутри).
 function PlotBuilder.ResolvePart(holder)
 	if not holder then
@@ -278,13 +277,9 @@ local function buildTempPlot(index, parent)
 	-- Место появления хозяина — у ближнего края, в проходе забора
 	makePart("Spawn", Vector3.new(8, 0.2, 6), CFrame.new(origin.X, top + 0.1, origin.Z + size.Z / 2 - 4), Color3.fromRGB(235, 235, 235), model)
 
-	-- Табличка с именем владельца
+	-- Табличка с именем владельца. У неё же покупают улучшение участка.
+	-- Стоит ЗА полом: её подсказка не должна мешать ставить яйца внутри.
 	makePart("Sign", Vector3.new(8, 1, 1), CFrame.new(origin.X, top + 4, origin.Z + size.Z / 2 + 1), Color3.fromRGB(120, 90, 60), model)
-
-	-- Тумба улучшения участка
-	-- Тумба стоит ЗА полом: её подсказка не должна мешать ставить яйца внутри
-	local upgrade = makePart("Upgrade", Vector3.new(4, 3, 4), CFrame.new(origin.X + 8, top + 1.5, origin.Z + size.Z / 2 + 3), Color3.fromRGB(230, 180, 50), model)
-	upgrade.Material = Enum.Material.Metal
 
 	-- Беговая дорожка — тоже снаружи, чтобы не занимать место под яйца
 	local treadmill = makePart("Treadmill", Vector3.new(6, 1, 10), CFrame.new(origin.X - 9, top, origin.Z + size.Z / 2 + 5), Color3.fromRGB(60, 60, 70), model)
@@ -343,10 +338,9 @@ function PlotBuilder.GetSpawnCFrame(plotModel)
 	return nil
 end
 
--- У какой детали покупают улучшение участка
+-- У какой детали покупают улучшение участка: у таблички Sign
 function PlotBuilder.GetUpgradePart(plotModel)
-	return PlotBuilder.ResolvePart(plotModel:FindFirstChild("Upgrade", true))
-		or PlotBuilder.ResolvePart(plotModel:FindFirstChild("Sign", true))
+	return PlotBuilder.ResolvePart(plotModel:FindFirstChild("Sign", true))
 end
 
 -- Беговая дорожка участка
@@ -473,14 +467,9 @@ function PlotBuilder.SetSignText(plotModel, text)
 		text, UDim2.fromScale(12, 2.5), Vector3.new(0, 2, 0), 250, false)
 end
 
+-- Цена улучшения висит над табличкой Sign. Пишем СВОЕЙ надписью,
+-- а не в надпись автора на табличке, иначе затрём имя владельца.
 function PlotBuilder.SetUpgradeText(plotModel, text)
-	local upgrade = plotModel:FindFirstChild("Upgrade", true)
-	if upgrade then
-		setLabelText(upgrade, "UpgradeSign", text, UDim2.fromScale(9, 2.5), Vector3.new(0, 3, 0), 120, false)
-		return
-	end
-	-- Своей тумбы нет: пишем над табличкой Sign, но СВОЕЙ надписью,
-	-- иначе затрём имя владельца.
 	setLabelText(plotModel:FindFirstChild("Sign", true), "UpgradeSign",
 		text, UDim2.fromScale(9, 2.5), Vector3.new(0, 5, 0), 120, true)
 end

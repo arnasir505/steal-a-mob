@@ -9,8 +9,9 @@
 --    в WalkSpeed той же формулой, что и стата игрока (Formulas.BossWalkSpeed).
 --    Эффективная скорость игрока (стата x замедление от яйца) >= Speed босса —
 --    игрок убежит, меньше — босс догонит;
---  * догнал в своём биоме — отбирает яйцо, кладёт туда, где оно появилось,
---    толкает игрока и идёт спать;
+--  * догнал в своём биоме — отбирает яйцо, толкает игрока (тот падает
+--    на RagdollTime секунд), несёт яйцо над головой туда, где оно появилось,
+--    ставит его и идёт спать;
 --  * догнал за пределами биома — только толкает и идёт спать. Яйцо остаётся
 --    у игрока (настройка GameConfig.Boss.OutsideCatchDropsEgg). Если игрок
 --    бросит яйцо и поднимет снова — босс снова проснётся;
@@ -52,6 +53,7 @@ local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
 
 local EggService = require(script.Parent.EggService)
+local RagdollService = require(script.Parent.RagdollService)
 local SpeedService = require(script.Parent.SpeedService)
 local WorldService = require(script.Parent.WorldService)
 local RoundService = require(script.Parent.RoundService)
@@ -90,9 +92,12 @@ local bosses = {} -- по одному на биом
 --   Model, Root, Humanoid, Status (TextLabel)
 --   BedPivot, BedPosition -- где спит
 --   CatchRadius -- с какого расстояния ловит
---   State       -- "Sleep", "Wake", "Chase", "Return"
+--   State       -- "Sleep", "Wake", "Chase", "Carry" (несёт яйцо на место), "Return"
 --   Target      -- за кем гонится
 --   Ignored     -- [eggId] = true: яйца, с которыми босс уже "разобрался"
+--   CarriedEgg  -- яйцо, которое он несёт на место
+--   HeadTop     -- на сколько макушка выше корневой детали (там держит яйцо)
+--   FootRadius  -- половина ширины: на таком расстоянии от места ставит яйцо
 -- }
 
 ---------------------------------------------------------------------
@@ -491,7 +496,16 @@ end
 -- Состояния: спит -> просыпается -> гонится -> идёт домой -> спит
 ---------------------------------------------------------------------
 
+-- Ставит яйцо, которое босс несёт, на место (дошёл, застрял или его отвлекли)
+local function releaseEgg(boss)
+	if boss.CarriedEgg then
+		EggService.PutBack(boss.CarriedEgg)
+		boss.CarriedEgg = nil
+	end
+end
+
 local function sleep(boss)
+	releaseEgg(boss)
 	boss.State = "Sleep"
 	boss.Target = nil
 	boss.Humanoid:MoveTo(boss.Root.Position)
@@ -545,6 +559,37 @@ local function goHome(boss, now)
 	boss.Humanoid:MoveTo(boss.BedPosition)
 	setStatus(boss, "...", SLEEP_COLOR)
 	playAnimation(boss, "Walk")
+end
+
+-- Несёт отобранное яйцо над головой к месту, где оно появилось
+local function startCarry(boss, egg, now)
+	boss.State = "Carry"
+	boss.Target = nil
+	boss.CarriedEgg = egg
+	boss.CarryStartedAt = now
+	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
+	boss.Humanoid:MoveTo(egg.SpawnPosition)
+	setStatus(boss, "Returning the egg", SLEEP_COLOR)
+	playAnimation(boss, "Walk")
+end
+
+local function walkWithEgg(boss, now)
+	local egg = boss.CarriedEgg
+	if not EggService.IsActive(egg) then
+		-- Яйцо пропало (сброс раунда) — нести нечего
+		boss.CarriedEgg = nil
+		goHome(boss, now)
+		return
+	end
+	local arrived = flatDistance(boss.Root.Position, egg.SpawnPosition) <= boss.FootRadius
+	local stuck = now - boss.CarryStartedAt > C.ReturnTimeout
+	if arrived or stuck then
+		releaseEgg(boss)
+		goHome(boss, now)
+		return
+	end
+	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
+	boss.Humanoid:MoveTo(egg.SpawnPosition)
 end
 
 local function walkHome(boss, now)
@@ -612,9 +657,10 @@ local function catch(boss, player, root, now)
 	end
 
 	local biome = WorldService.GetBiomeAt(root.Position)
+	local takenEgg
 	if biome and biome.Id == boss.Id then
-		-- В своём биоме: отбирает яйцо и кладёт на место
-		EggService.ReturnToSpawn(player)
+		-- В своём биоме: отбирает яйцо и несёт его над головой на место
+		takenEgg = EggService.GiveToBoss(player, boss.Root, boss.HeadTop)
 		Remotes.Notify(player, "Caught!", boss.Name .. " took the egg back.")
 	elseif C.OutsideCatchDropsEgg then
 		EggService.Drop(player, root.Position)
@@ -626,8 +672,14 @@ local function catch(boss, player, root, now)
 		Remotes.Notify(player, "Pushed!", boss.Name .. " gave up. Run to the safe zone!")
 	end
 
+	-- Сначала роняем, потом толкаем: так игрок улетает уже обмякшим
+	RagdollService.Ragdoll(player, C.RagdollTime)
 	SpeedService.Knockback(player, boss.Root.Position, boss.Config.Knockback or 60)
-	goHome(boss, now)
+	if takenEgg then
+		startCarry(boss, takenEgg, now)
+	else
+		goHome(boss, now)
+	end
 end
 
 ---------------------------------------------------------------------
@@ -659,6 +711,19 @@ local function update(boss, now)
 	end
 
 	local target = pickTarget(boss)
+
+	-- Несёт отобранное яйцо на место
+	if boss.State == "Carry" then
+		if target and C.CarryInterruptible then
+			-- Кто-то крадёт другое яйцо: ставит это на место сразу и в погоню
+			releaseEgg(boss)
+			boss.State = "Return"
+		else
+			walkWithEgg(boss, now)
+			return
+		end
+	end
+
 	if not target then
 		if boss.State == "Wake" then
 			sleep(boss) -- ещё не сошёл с места
@@ -736,13 +801,15 @@ local function setupBoss(biome)
 	local root = prepareModel(model, config.TurnDegrees)
 	makeLabel(model, root, name)
 
-	local _, size = model:GetBoundingBox()
+	local boxCFrame, size = model:GetBoundingBox()
 	local boss = {
 		Id = biome.Id,
 		Name = name,
 		Config = config,
 		BedPivot = model:GetPivot(),
 		BedPosition = root.Position,
+		HeadTop = (boxCFrame.Position.Y + size.Y / 2) - root.Position.Y,
+		FootRadius = math.max(3, math.max(size.X, size.Z) / 2),
 		CatchRadius = C.CatchDistance + math.max(size.X, size.Z) / 2,
 		State = "Sleep",
 		Ignored = {},

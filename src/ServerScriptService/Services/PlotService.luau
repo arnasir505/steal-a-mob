@@ -677,7 +677,7 @@ function PlotService.Init()
 		else
 			-- Подсказка автору: что из необязательных деталей не найдено внутри участка
 			local missing = {}
-			for _, name in ipairs({ "Spawn", "Sign", "Upgrade", "Treadmill" }) do
+			for _, name in ipairs({ "Spawn", "Sign", "Treadmill" }) do
 				if not model:FindFirstChild(name, true) then
 					table.insert(missing, name)
 				end

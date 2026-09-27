@@ -1,7 +1,8 @@
 -- EggService: яйца в биомах.
 --
 --  * спавнит яйца в биомах (общие для всех игроков сервера);
---  * даёт поднять яйцо: оно висит над головой и замедляет игрока;
+--  * даёт поднять яйцо (держать E PickupHoldTime секунд): оно висит над головой
+--    и замедляет игрока;
 --  * даёт бросить яйцо на землю вне safe zone (кнопка G);
 --  * засчитывает кражу, когда игрок донёс яйцо в safe zone;
 --  * при появлении редкого яйца объявляет об этом всему серверу.
@@ -15,7 +16,8 @@
 --   EggService.EggDropped    (player, biomeId, item, eggId)  -- бросил, удар мечом (этап 6), босс
 --
 --   EggService.Drop(player, position)   -- яйцо падает на землю под точкой
---   EggService.ReturnToSpawn(player)    -- босс отобрал: яйцо туда, где появилось
+--   EggService.GiveToBoss(player, bossRoot, headTop) -- босс отобрал: яйцо у него над головой
+--   EggService.PutBack(egg)             -- босс донёс: яйцо встаёт туда, где появилось
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -45,6 +47,7 @@ local eggsFolder          -- Workspace.WorldEggs
 local activeEggs = {}     -- [eggId] = { Id, BiomeId, Item, Model, Position, Carrier }
 local carrying = {}       -- [player] = запись яйца
 local lastDropAt = {}     -- [player] = когда последний раз бросал (защита от спама)
+local holdStarted = {}    -- [player] = { EggId, At }: когда начал держать E у яйца
 local nextEggId = 1
 
 local takenEvent = Instance.new("BindableEvent")
@@ -122,7 +125,14 @@ local function makePrompt(egg)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.MaxActivationDistance = E.PickupDistance + eggRadius(egg.Model)
+	-- Яйцо поднимается не сразу: надо держать E (на экране крутится кружок)
+	prompt.HoldDuration = E.PickupHoldTime
 	prompt.Parent = anchor
+	-- Запоминаем, когда игрок начал держать: читер может нажать "мгновенно",
+	-- и сервер это проверит
+	prompt.PromptButtonHoldBegan:Connect(function(player)
+		holdStarted[player] = { EggId = egg.Id, At = os.clock() }
+	end)
 	prompt.Triggered:Connect(function(player)
 		EggService.Take(player, egg.Id)
 	end)
@@ -189,6 +199,26 @@ end
 -- Поднять яйцо
 ---------------------------------------------------------------------
 
+-- Вешает яйцо над root (игрок или босс): центр яйца на высоте lift
+local function attachAbove(model, root, lift)
+	PlotBuilder.CenterAt(model, (root.CFrame * CFrame.new(0, lift, 0)).Position)
+	local primary = model.PrimaryPart
+	local weld = Instance.new("Weld")
+	weld.Name = "CarryWeld"
+	weld.Part0 = root
+	weld.Part1 = primary
+	-- Держим ту позицию, в которую только что поставили модель
+	weld.C0 = root.CFrame:ToObjectSpace(primary.CFrame)
+	weld.Parent = primary
+end
+
+local function removeCarryWeld(model)
+	local weld = model.PrimaryPart and model.PrimaryPart:FindFirstChild("CarryWeld")
+	if weld then
+		weld:Destroy()
+	end
+end
+
 local function detach(player, egg)
 	carrying[player] = nil
 	egg.Carrier = nil
@@ -202,7 +232,15 @@ end
 
 function EggService.Take(player, eggId)
 	local egg = activeEggs[eggId]
-	if not egg or egg.Carrier then
+	if not egg or egg.Carrier or egg.HeldByBoss then
+		return false
+	end
+	-- Держал ли игрок E сколько положено (небольшой запас на задержку сети)
+	local hold = holdStarted[player]
+	holdStarted[player] = nil
+	if E.PickupHoldTime > 0 and (not hold or hold.EggId ~= eggId
+		or os.clock() - hold.At < E.PickupHoldTime * 0.8) then
+		warn("[EggService] " .. player.Name .. " поднял яйцо без удержания E — отклонено")
 		return false
 	end
 	if carrying[player] then
@@ -232,15 +270,7 @@ function EggService.Take(player, eggId)
 	-- Большое яйцо поднимаем выше, чтобы оно не залезало в голову.
 	local height = egg.Model:GetExtentsSize().Y
 	local lift = E.CarryHeight + math.max(0, height - NORMAL_EGG_HEIGHT) / 2
-	PlotBuilder.CenterAt(egg.Model, (root.CFrame * CFrame.new(0, lift, 0)).Position)
-	local primary = egg.Model.PrimaryPart
-	local weld = Instance.new("Weld")
-	weld.Name = "CarryWeld"
-	weld.Part0 = root
-	weld.Part1 = primary
-	-- Держим ту позицию, в которую только что поставили модель
-	weld.C0 = root.CFrame:ToObjectSpace(primary.CFrame)
-	weld.Parent = primary
+	attachAbove(egg.Model, root, lift)
 	egg.Model.Parent = character
 
 	-- Тяжёлое яйцо замедляет: SpeedService читает этот атрибут
@@ -275,10 +305,7 @@ end
 -- Снимает яйцо с игрока и ставит на землю ровно в точку ground
 local function putDown(player, egg, ground)
 	local model = egg.Model
-	local weld = model.PrimaryPart:FindFirstChild("CarryWeld")
-	if weld then
-		weld:Destroy()
-	end
+	removeCarryWeld(model)
 	detach(player, egg)
 
 	model.Parent = eggsFolder
@@ -304,13 +331,50 @@ function EggService.Drop(player, position)
 	return putDown(player, egg, ground)
 end
 
--- Босс отобрал яйцо: оно возвращается туда, где появилось
-function EggService.ReturnToSpawn(player)
+-- Босс отобрал яйцо: оно переезжает к нему над голову. headTop — на сколько
+-- макушка босса выше его корневой детали. Возвращает запись яйца или nil.
+-- Пока яйцо у босса, взять его нельзя.
+function EggService.GiveToBoss(player, bossRoot, headTop)
 	local egg = carriedEgg(player)
 	if not egg then
+		return nil
+	end
+	local model = egg.Model
+	removeCarryWeld(model)
+	detach(player, egg)
+	egg.HeldByBoss = true
+
+	model.Parent = eggsFolder
+	local height = model:GetExtentsSize().Y
+	attachAbove(model, bossRoot, headTop + 0.5 + height / 2)
+	droppedEvent:Fire(player, egg.BiomeId, egg.Item, egg.Id)
+	return egg
+end
+
+-- Яйцо ещё в игре (не удалено сбросом раунда)
+function EggService.IsActive(egg)
+	return egg ~= nil and activeEggs[egg.Id] == egg
+		and egg.Model ~= nil and egg.Model.Parent ~= nil
+end
+
+-- Босс донёс яйцо: оно встаёт туда, где появилось, и его снова можно взять
+function EggService.PutBack(egg)
+	if not EggService.IsActive(egg) or not egg.Model.PrimaryPart then
 		return false
 	end
-	return putDown(player, egg, egg.SpawnPosition or egg.Position)
+	local model = egg.Model
+	removeCarryWeld(model)
+	egg.HeldByBoss = nil
+
+	local ground = egg.SpawnPosition or egg.Position
+	model.Parent = eggsFolder
+	PlotBuilder.PlaceOnGround(model, ground, math.random() * math.pi * 2)
+	anchorModel(model)
+	egg.Position = ground
+	if egg.Prompt then
+		egg.Prompt.Enabled = true
+	end
+	return true
 end
 
 -- Игрок сам бросил яйцо (кнопка G). Только вне safe zone:
@@ -448,6 +512,7 @@ function EggService.Init()
 
 	Players.PlayerRemoving:Connect(function(player)
 		lastDropAt[player] = nil
+		holdStarted[player] = nil
 		local egg = carrying[player]
 		if egg then
 			detach(player, egg)

@@ -23,6 +23,7 @@
 --   !drop                  — бросить яйцо из рук (то же, что кнопка G)
 --   !boss                  — что делают боссы и убежишь ли ты от них
 --   !boss home             — все боссы на место и спать
+--   !ragdoll               — упасть, как от толчка босса (проверить ragdoll)
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -51,6 +52,7 @@ local WorldService = require(Services.WorldService)
 local EggService = require(Services.EggService)
 local RoundService = require(Services.RoundService)
 local BossService = require(Services.BossService)
+local RagdollService = require(Services.RagdollService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -237,7 +239,9 @@ local function printEggs()
 			egg.Id,
 			InventoryService.Describe(egg.Item),
 			egg.BiomeId,
-			egg.Carrier and (" — несёт " .. egg.Carrier.Name) or ""))
+			egg.Carrier and (" — несёт " .. egg.Carrier.Name)
+				or egg.HeldByBoss and " — несёт босс"
+				or ""))
 	end
 end
 
@@ -417,6 +421,13 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "ragdoll" then
+		-- Толчок как будто спереди: игрок падает назад
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			RagdollService.Ragdoll(player, GameConfig.Boss.RagdollTime)
+			SpeedService.Knockback(player, root.Position + root.CFrame.LookVector * 5, 60)
+		end
 	elseif command == "drop" then
 		print("Бросил яйцо:", EggService.RequestDrop(player))
 	elseif command == "boss" then
