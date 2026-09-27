@@ -1,5 +1,5 @@
 -- RagdollService: игрок падает "тряпичной куклой" и через немного встаёт.
--- Урона нет. Сейчас так падают от толчка босса, на этапе 6 можно и от меча.
+-- Урона нет. Так падают от толчка босса (BossService) и от удара мечом (SwordService).
 --
 --   RagdollService.Ragdoll(player, seconds)
 --   RagdollService.IsRagdolled(player)

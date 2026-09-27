@@ -24,6 +24,7 @@
 --   !boss                  — что делают боссы и убежишь ли ты от них
 --   !boss home             — все боссы на место и спать
 --   !ragdoll               — упасть, как от толчка босса (проверить ragdoll)
+--   !sword WoodenSword     — выдать и надеть меч (без имени — список, !sword off — убрать)
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -53,6 +54,7 @@ local EggService = require(Services.EggService)
 local RoundService = require(Services.RoundService)
 local BossService = require(Services.BossService)
 local RagdollService = require(Services.RagdollService)
+local SwordService = require(Services.SwordService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -225,6 +227,16 @@ local function printTrails(player)
 		local owned = data and data.Trails[id] and " (куплен)" or ""
 		print(string.format("  %-14s $%-10s дорожка x%s%s",
 			id, Format.Number(config.Price), config.TreadmillMult, owned))
+	end
+end
+
+local function printSwords(player)
+	local data = DataService.Get(player)
+	print("--- Swords ---")
+	for id, config in pairs(Items.Swords) do
+		local owned = data and data.Swords[id] and " (есть)" or ""
+		local equipped = data and data.EquippedSword == id and " [в руках]" or ""
+		print(string.format("  %-14s толчок %s%s%s", id, Format.Number(config.Knockback), owned, equipped))
 	end
 end
 
@@ -421,6 +433,20 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "sword" then
+		local word = words[2]
+		if word and string.lower(word) == "off" then
+			SwordService.Equip(player, "")
+		elseif word then
+			local id = findKey(Items.Swords, word)
+			if id then
+				SwordService.Grant(player, id)
+				SwordService.Equip(player, id)
+			else
+				print("Нет такого меча:", word)
+			end
+		end
+		printSwords(player)
 	elseif command == "ragdoll" then
 		-- Толчок как будто спереди: игрок падает назад
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")

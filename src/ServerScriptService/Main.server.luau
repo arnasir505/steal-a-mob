@@ -17,6 +17,7 @@ local PlotService = require(Services.PlotService)
 local EggService = require(Services.EggService)
 local RagdollService = require(Services.RagdollService)
 local BossService = require(Services.BossService)
+local SwordService = require(Services.SwordService)
 local RoundService = require(Services.RoundService)
 local TimeChangeService = require(Services.TimeChangeService)
 
@@ -36,6 +37,7 @@ PlotService.Init()
 EggService.Init()
 RagdollService.Init()
 BossService.Init() -- до раундов: иначе яйца могут упасть на модель босса
+SwordService.Init()
 RoundService.Init()
 TimeChangeService.Init()
 

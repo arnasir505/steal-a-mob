@@ -2,10 +2,19 @@
 
 local Items = {}
 
--- Мечи выдаются за открытие всех мобов биома (см. Biomes.SwordReward)
--- Knockback — сила отталкивания другого игрока
+-- Мечи выдаются за открытие всех мобов биома (см. Biomes.SwordReward).
+-- В руках всегда один меч; новый меч сильнее надетого надевается сам.
+-- Knockback — сила толчка: скорость в студах в секунду (у босса Plains — 60).
+--             Чем реже меч, тем она больше.
+-- Rarity    — редкость меча (цвет в интерфейсе, у временной модели — цвет лезвия)
+-- Color     — необязательно: цвет лезвия временной модели
+-- ModelName — модель в ReplicatedStorage.Assets.Swords (Tool или модель с деталью Handle).
+--             Нет модели — выдаётся временный меч из кубиков.
 Items.Swords = {
-	WoodenSword = { DisplayName = "Wooden Sword", Knockback = 40, ModelName = "WoodenSword" },
+	WoodenSword = { DisplayName = "Wooden Sword", Rarity = "Common", Knockback = 40, ModelName = "WoodenSword",
+		Color = Color3.fromRGB(170, 125, 75) },
+		DiamondSword = { DisplayName = "Diamond Sword", Rarity = "Legendary", Knockback = 114, ModelName = "DiamondSword",
+		Color = Color3.fromRGB(170, 125, 75) },
 }
 
 -- Трейлы покупаются за деньги и дают множитель к беговой дорожке.
