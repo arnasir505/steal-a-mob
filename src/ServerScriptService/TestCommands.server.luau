@@ -25,6 +25,9 @@
 --   !boss home             — все боссы на место и спать
 --   !ragdoll               — упасть, как от толчка босса (проверить ragdoll)
 --   !sword WoodenSword     — выдать и надеть меч (без имени — список, !sword off — убрать)
+--   !index                 — показать индекс мобов и награды
+--   !index Cow             — открыть одного моба (!index all — всех, чтобы получить мечи)
+--   !index reset           — очистить индекс и забрать мечи (проверить награду заново)
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -55,6 +58,7 @@ local RoundService = require(Services.RoundService)
 local BossService = require(Services.BossService)
 local RagdollService = require(Services.RagdollService)
 local SwordService = require(Services.SwordService)
+local IndexService = require(Services.IndexService)
 local TrailService = require(Services.TrailService)
 local TimeChangeService = require(Services.TimeChangeService)
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -237,6 +241,26 @@ local function printSwords(player)
 		local owned = data and data.Swords[id] and " (есть)" or ""
 		local equipped = data and data.EquippedSword == id and " [в руках]" or ""
 		print(string.format("  %-14s толчок %s%s%s", id, Format.Number(config.Knockback), owned, equipped))
+	end
+end
+
+local function printIndex(player)
+	local data = DataService.Get(player)
+	if not data then
+		return
+	end
+	print("--- Index ---")
+	for _, biome in ipairs(Biomes.List) do
+		local opened, total = Formulas.IndexProgress(data.Index, biome.Id)
+		local reward = biome.SwordReward and Items.Swords[biome.SwordReward]
+		local got = biome.SwordReward and data.Swords[biome.SwordReward]
+		print(string.format("  %s: %d/%d, награда: %s%s", biome.Id, opened, total,
+			reward and reward.DisplayName or "нет", got and " (получена)" or ""))
+		local marks = {}
+		for _, mobId in ipairs(Formulas.BiomeMobIds(biome.Id)) do
+			table.insert(marks, (data.Index[mobId] and "[x] " or "[ ] ") .. mobId)
+		end
+		print("    " .. table.concat(marks, "   "))
 	end
 end
 
@@ -433,6 +457,28 @@ local function onChatted(player, message)
 		print("Ворота " .. (close and "закрыты" or "открыты"))
 	elseif command == "eggs" then
 		printEggs()
+	elseif command == "index" then
+		local word = words[2] and string.lower(words[2])
+		if word == "all" then
+			for mobId in pairs(Mobs) do
+				IndexService.Discover(player, mobId)
+			end
+		elseif word == "reset" then
+			local data = DataService.Get(player)
+			if data then
+				data.Index = {}
+				data.Swords = {}
+				SwordService.Equip(player, "")
+			end
+		elseif word then
+			local mobId = findKey(Mobs, words[2])
+			if mobId then
+				IndexService.Discover(player, mobId)
+			else
+				print("Нет такого моба:", words[2])
+			end
+		end
+		printIndex(player)
 	elseif command == "sword" then
 		local word = words[2]
 		if word and string.lower(word) == "off" then

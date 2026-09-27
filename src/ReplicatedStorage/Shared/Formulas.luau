@@ -157,6 +157,28 @@ function Formulas.RollMobId(rng, biomeId)
 	return Formulas.WeightedPick(entries, rng)
 end
 
+-- Мобы биома по алфавиту (для индекса и интерфейса)
+function Formulas.BiomeMobIds(biomeId)
+	local list = {}
+	for _, entry in ipairs(mobsInBiome(biomeId)) do
+		table.insert(list, entry.Key)
+	end
+	return list
+end
+
+-- Сколько мобов биома открыто в индексе. index = data.Index ({ [MobId] = true }).
+-- Возвращает: открыто, всего
+function Formulas.IndexProgress(index, biomeId)
+	local opened, total = 0, 0
+	for _, entry in ipairs(mobsInBiome(biomeId)) do
+		total = total + 1
+		if index[entry.Key] then
+			opened = opened + 1
+		end
+	end
+	return opened, total
+end
+
 -- Целое яйцо для спавна в биоме: кто внутри, какой редкости и сколько весит.
 -- Мутации у яйца нет — она выпадает при вылуплении.
 function Formulas.RollEgg(rng, biomeId)

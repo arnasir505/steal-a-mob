@@ -10,7 +10,7 @@
 --  * пока игрок несёт яйцо, бить не может: когда он берёт яйцо, меч убирается из рук;
 --  * от удара яйцо падает на землю — подобрать его может кто угодно.
 --
--- Мечи выдаются за индекс (этап 7):
+-- Мечи выдаются за полный индекс биома (IndexService) и тестовой командой !sword:
 --   SwordService.Grant(player, "WoodenSword")  -- выдать (и надеть, если он сильнее)
 --   SwordService.Equip(player, "WoodenSword")  -- надеть свой меч ("" — убрать)
 -- В руках всегда один меч — надетый (data.EquippedSword).
@@ -329,8 +329,9 @@ function SwordService.Equip(player, swordId)
 	return true
 end
 
--- Выдать меч (индекс на этапе 7, тестовая команда). Если он сильнее надетого — надевается сам.
-function SwordService.Grant(player, swordId)
+-- Выдать меч (награда индекса, тестовая команда). Если он сильнее надетого — надевается сам.
+-- silent = true — без сообщения (у индекса своё сообщение про награду)
+function SwordService.Grant(player, swordId, silent)
 	local data = DataService.Get(player)
 	local config = Items.Swords[swordId]
 	if not data or not config then
@@ -340,7 +341,9 @@ function SwordService.Grant(player, swordId)
 		return true
 	end
 	data.Swords[swordId] = true
-	Remotes.Notify(player, "New sword!", config.DisplayName)
+	if not silent then
+		Remotes.Notify(player, "New sword!", config.DisplayName)
+	end
 
 	local current = Items.Swords[data.EquippedSword]
 	if not current or config.Knockback > current.Knockback then

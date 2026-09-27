@@ -29,6 +29,11 @@ local InventoryService = {}
 local changedEvent = Instance.new("BindableEvent")
 InventoryService.Changed = changedEvent.Event -- (player) — рюкзак изменился
 
+-- (player, item) — моб попал в рюкзак (новый или убранный с участка).
+-- На это смотрит индекс мобов.
+local mobAddedEvent = Instance.new("BindableEvent")
+InventoryService.MobAdded = mobAddedEvent.Event
+
 ---------------------------------------------------------------------
 -- Вспомогательное
 ---------------------------------------------------------------------
@@ -149,6 +154,7 @@ function InventoryService.AddMobItem(player, item)
 	local id = nextItemId(data)
 	data.Backpack.Mobs[id] = item
 	refresh(player, data)
+	mobAddedEvent:Fire(player, item)
 	return id
 end
 

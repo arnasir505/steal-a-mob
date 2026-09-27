@@ -39,6 +39,10 @@ local PlotBuilder = require(script.Parent.PlotBuilder)
 
 local PlotService = {}
 
+-- (player, item) — яйцо на участке вылупилось. На это смотрит индекс мобов.
+local hatchedEvent = Instance.new("BindableEvent")
+PlotService.MobHatched = hatchedEvent.Event
+
 local rng = Random.new()
 
 local plots = {}      -- список участков
@@ -412,7 +416,6 @@ local function hatch(data, id, placed)
 	item.Mutation = Formulas.RollMutation(rng)
 	placed.Type = "Mob"
 	placed.HatchEndsAt = nil
-	data.Index[item.MobId] = true -- индекс мобов (этап 7)
 	return item
 end
 
@@ -424,6 +427,7 @@ local function processHatching(player, data, notify)
 		if placed.Type == "Egg" and now >= (placed.HatchEndsAt or 0) then
 			local item = hatch(data, id, placed)
 			hatched = true
+			hatchedEvent:Fire(player, item) -- индекс мобов (IndexService)
 			if notify then
 				Remotes.Notify(player, "Egg hatched!", InventoryService.Describe(item))
 				-- Редкая мутация — событие для всего сервера
