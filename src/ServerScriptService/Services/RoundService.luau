@@ -3,7 +3,8 @@
 -- Порядок сброса:
 --   1. за 10 секунд — предупреждение всем игрокам;
 --   2. все яйца вне рюкзаков удаляются (и на земле, и в руках);
---   3. всех игроков телепортирует на свой участок в safe zone;
+--   3. всех, кто не в safe zone, телепортирует на свой участок
+--      (кто уже в safe zone или бежит на беговой дорожке, остаётся на месте);
 --   4. ворота биомов закрываются на пару секунд;
 --   5. спавнятся новые яйца;
 --   6. ворота открываются, раунд пошёл.
@@ -48,10 +49,15 @@ local function setRoundEnd(seconds)
 	ReplicatedStorage:SetAttribute("RoundEndsAt", roundEndsAt)
 end
 
--- Всех в safe zone, на свои участки
+-- Всех из биомов — на свои участки. Кто уже в safe zone, того не трогаем:
+-- там он в безопасности, а телепорт только мешал бы (сбивал бы тренировку
+-- на дорожке, выдёргивал бы из магазина). Дорожку проверяем отдельно —
+-- на случай, если она стоит чуть за границей SafeZone
 local function sendEveryoneHome()
 	for _, player in ipairs(Players:GetPlayers()) do
-		PlotService.SendHome(player)
+		if not player:GetAttribute("OnTreadmill") and not WorldService.IsPlayerInSafeZone(player) then
+			PlotService.SendHome(player)
+		end
 	end
 end
 

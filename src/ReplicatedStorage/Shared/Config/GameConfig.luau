@@ -28,7 +28,7 @@ GameConfig.Zone = {
 -- Яйца в биомах
 GameConfig.Egg = {
 	CarryHeight = 4,           -- на какой высоте над игроком висит яйцо
-	SpawnMinDistance = 18,     -- минимальное расстояние между яйцами в биоме
+	SpawnMinDistance = 1,     -- минимальное расстояние между яйцами в биоме
 	SpawnTries = 25,           -- сколько раз пробовать найти свободную точку
 	SpawnHeightAbove = 60,     -- с какой высоты искать пол под точкой спавна
 	PickupDistance = 12,       -- с какого расстояния можно взять яйцо
@@ -103,7 +103,7 @@ GameConfig.Weight = {
 	ModelScaleCurve = 3,
 	-- Яйца растут по той же кривой, но до своего предела: яйцо несут над головой,
 	-- и огромное закрыло бы игроку весь обзор
-	EggMaxModelScale = 10,
+	EggMaxModelScale = 20 ,
 	CarrySlowPerLog = 0.08,  -- -8% скорости за каждые x10 веса несомого яйца
 	MinCarryMultiplier = 0.3,-- яйцо не может замедлить сильнее, чем до 30%
 	SpawnMaxWeight = 100000,   -- самое тяжёлое яйцо в биоме, если у биома не указан MaxWeight (Config/Biomes)
@@ -204,6 +204,8 @@ GameConfig.Offline = {
 -- Бить можно только в биомах. Урона нет: удар роняет игрока (ragdoll)
 -- и отталкивает (сила — Knockback меча в Config/Items).
 GameConfig.Combat = {
+	StarterSword = "WoodenSword", -- меч, который есть у каждого игрока с самого начала
+	                      -- (id из Config/Items). "" — начального меча нет
 	HitCooldown = 1.5,      -- перезарядка удара (секунды)
 	RagdollTime = 1,    -- сколько секунд игрок лежит после удара мечом.
 	                      -- Лежачего бить нельзя. Если сделать больше HitCooldown,

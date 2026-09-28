@@ -10,7 +10,8 @@
 --  * пока игрок несёт яйцо, бить не может: когда он берёт яйцо, меч убирается из рук;
 --  * от удара яйцо падает на землю — подобрать его может кто угодно.
 --
--- Мечи выдаются за полный индекс биома (IndexService) и тестовой командой !sword:
+-- Начальный меч (GameConfig.Combat.StarterSword) выдаётся всем при входе.
+-- Остальные — за полный индекс биома (IndexService) и тестовой командой !sword:
 --   SwordService.Grant(player, "WoodenSword")  -- выдать (и надеть, если он сильнее)
 --   SwordService.Equip(player, "WoodenSword")  -- надеть свой меч ("" — убрать)
 -- В руках всегда один меч — надетый (data.EquippedSword).
@@ -352,6 +353,24 @@ function SwordService.Grant(player, swordId, silent)
 	return true
 end
 
+-- Начальный меч: выдаётся, если его ещё нет, и надевается, если руки пусты.
+-- Зовётся при каждом входе, поэтому меч получат и игроки со старыми сохранениями.
+function SwordService.GiveStarter(player)
+	local data = DataService.Get(player)
+	local starterId = C.StarterSword
+	if not data or not starterId or starterId == "" or data.Swords[starterId] then
+		return
+	end
+	if not Items.Swords[starterId] then
+		warn("[SwordService] Начальный меч " .. starterId .. " не найден в Config/Items")
+		return
+	end
+	data.Swords[starterId] = true
+	if data.EquippedSword == "" then
+		data.EquippedSword = starterId
+	end
+end
+
 function SwordService.Init()
 	-- Для интерфейса на этапе 11: сервер проверит, что меч свой
 	Remotes.Event("EquipSword").OnServerEvent:Connect(function(player, swordId)
@@ -363,6 +382,7 @@ function SwordService.Init()
 		if data.EquippedSword ~= "" and not (Items.Swords[data.EquippedSword] and data.Swords[data.EquippedSword]) then
 			data.EquippedSword = ""
 		end
+		SwordService.GiveStarter(player)
 		player:SetAttribute("EquippedSword", data.EquippedSword)
 		giveSword(player)
 		player.CharacterAdded:Connect(function()

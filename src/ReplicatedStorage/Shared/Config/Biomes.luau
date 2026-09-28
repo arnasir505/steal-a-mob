@@ -16,7 +16,9 @@
 --                  (Workspace.Biomes.Plains.Farmer) — где стоит, там и спит.
 --                  Подробнее — в начале BossService.
 -- Boss.TurnDegrees — если босс бежит боком или спиной, поставь 90, -90 или 180
--- SwordReward    — меч за открытие всех мобов биома в индексе
+-- SwordReward    — необязательно: меч за открытие всех мобов биома в индексе.
+--                  У Plains награды нет: деревянный меч — начальный
+--                  (GameConfig.Combat.StarterSword)
 -- ModelName      — имя папки биома в Workspace (сделаешь сам)
 --
 -- Какие мобы живут в биоме, задаётся в Config/Mobs полем Biome.
@@ -31,7 +33,6 @@ Biomes.List = {
 		EggsAtOnce = 5,
 		Rarities = { "Common", "Uncommon", "Rare" },
 		MaxWeight = 500,
-		SwordReward = "WoodenSword",
 		Boss = {
 			DisplayName = "Farmer",
 			ModelName = "Farmer",

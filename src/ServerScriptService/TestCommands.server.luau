@@ -27,7 +27,7 @@
 --   !sword WoodenSword     — выдать и надеть меч (без имени — список, !sword off — убрать)
 --   !index                 — показать индекс мобов и награды
 --   !index Cow             — открыть одного моба (!index all — всех, чтобы получить мечи)
---   !index reset           — очистить индекс и забрать мечи (проверить награду заново)
+--   !index reset           — очистить индекс и забрать мечи, кроме начального
 --   !fuse                  — синтез без машины: 3 самых дешёвых моба одного вида из рюкзака
 --   !fuse Chicken          — то же, но только из Куриц
 --   !friends 2             — притвориться, что на сервере 2 друга (!friends off — по-настоящему)
@@ -527,7 +527,9 @@ local function onChatted(player, message)
 			if data then
 				data.Index = {}
 				data.Swords = {}
-				SwordService.Equip(player, "")
+				data.EquippedSword = ""
+				SwordService.GiveStarter(player)
+				SwordService.Equip(player, data.EquippedSword)
 			end
 		elseif word then
 			local mobId = findKey(Mobs, words[2])
