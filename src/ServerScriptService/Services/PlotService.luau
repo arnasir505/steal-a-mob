@@ -143,7 +143,7 @@ local function renderItem(entry, id, placed)
 		return
 	end
 	model.Name = id
-	PlotBuilder.PlaceModel(model, entry.Floor, placed.X or 0, placed.Z or 0, placed.R or 0)
+	PlotBuilder.PlaceModel(model, entry.Anchor, placed.X or 0, placed.Z or 0, placed.R or 0)
 	model.Parent = entry.Placed
 
 	local label = PlotBuilder.EnsureItemLabel(model)
@@ -271,8 +271,8 @@ function PlotService.PlaceFromBackpack(player)
 		return
 	end
 
-	local x, z = PlotBuilder.ToLocal(entry.Floor, root.Position)
-	if not PlotBuilder.IsInside(entry.Floor, x, z) then
+	local x, z = PlotBuilder.ToLocal(entry.Anchor, root.Position)
+	if not PlotBuilder.IsInsidePlot(entry.Model, data.BaseLevel, x, z) then
 		Remotes.Notify(player, "Not your base", "Stand inside your own fence to place eggs.")
 		return
 	end
@@ -299,7 +299,7 @@ function PlotService.PlaceFromBackpack(player)
 	end
 
 	-- Модель смотрит туда же, куда смотрел игрок
-	local look = entry.Floor.CFrame:VectorToObjectSpace(root.CFrame.LookVector)
+	local look = entry.Anchor.CFrame:VectorToObjectSpace(root.CFrame.LookVector)
 	local yaw = math.atan2(-look.X, -look.Z)
 
 	local placed = { Type = kind, Item = item, X = x, Z = z, R = yaw }
@@ -699,6 +699,9 @@ function PlotService.Init()
 			local entry = {
 				Model = model,
 				Floor = floor,
+				-- Исходный пол из Studio: от него считаются координаты предметов,
+				-- чтобы при росте участка они не съезжали. Берём ДО первого роста.
+				Anchor = PlotBuilder.GetAnchor(model),
 				Placed = PlotBuilder.EnsurePlacedFolder(model),
 				Owner = nil,
 				Models = {},

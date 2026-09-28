@@ -21,13 +21,18 @@
 --              Если его нет, берётся вся модель дорожки.
 --              Необязательная деталь "Treadmill_Front" задаёт, куда лицом бежать;
 --              без неё игрок встаёт вдоль длинной стороны полотна.
---   Fences   — необязательно. Папка с моделями заборов: Fence0, Fence3, Fence7...
---              Число в имени — с какого уровня улучшения показывать этот забор.
---              Виден всегда только один: с самым большим числом, до которого
---              дорос участок. Остальные на время убираются из мира целиком
---              (вместе с текстурами и столкновениями). Забор может быть
---              моделью, одной деталью или Union — неважно.
---              Если папки нет, игра строит простой забор из деталей сама.
+--
+-- Участок растёт с уровнем базы: передний край (где Spawn и табличка) на месте,
+-- участок растёт назад и в стороны. Пол Floor растягивается сам.
+--
+-- Забор строится сам по всему периметру из звена забора:
+--   ReplicatedStorage.Assets.Fences.<любое имя> — одно звено (модель или деталь).
+--   Длинная сторона звена ляжет вдоль края, сторона Front — наружу.
+--   Можно положить несколько звеньев с числом в имени: Fence0, Fence5, Fence10 —
+--   число = с какого уровня базы использовать это звено (забор "красивеет").
+-- Если звена нет, но в участке есть папка Fences с целыми заборами (Fence0, Fence3...),
+-- показывается подходящий из них (под растущий участок это не подходит).
+-- Если нет ни того, ни другого — игра ставит простые столбики.
 --
 -- Отдельных деталей под слоты БОЛЬШЕ НЕ НУЖНО: игрок ставит яйцо в любом
 -- свободном месте участка, а уровень улучшения задаёт только число мест.
@@ -133,10 +138,18 @@ function PlotBuilder.ResolvePart(holder)
 end
 
 ---------------------------------------------------------------------
--- Границы участка
+-- Границы участка и его рост
 ---------------------------------------------------------------------
+--
+-- Участок растёт с уровнем базы: передний край (где Spawn и табличка) стоит
+-- на месте, а участок растёт назад и в стороны — на звено забора за уровень
+-- (GameConfig.Plot: GrowDepthSegments, GrowSideSegments, GrowMaxLevel).
+--
+-- Размер на уровне 0 — пол Floor, как он сделан в Studio. Координаты
+-- поставленных яиц и мобов считаются от ЭТОГО исходного пола ("якорь"),
+-- поэтому, когда пол растёт и сдвигается, предметы остаются на своих местах.
 
--- Пол участка. По нему считаются границы.
+-- Пол участка
 function PlotBuilder.GetFloor(plotModel)
 	local floor = plotModel:FindFirstChild("Floor", true) or plotModel:FindFirstChild("Area", true)
 	if floor and floor:IsA("BasePart") then
@@ -148,29 +161,256 @@ function PlotBuilder.GetFloor(plotModel)
 	return plotModel:FindFirstChildWhichIsA("BasePart", true)
 end
 
--- Переводит мировую точку в координаты участка (x, z от центра пола)
-function PlotBuilder.ToLocal(floor, worldPosition)
-	local local3 = floor.CFrame:PointToObjectSpace(worldPosition)
+-- Переводит мировую точку в координаты участка (x, z от центра якоря)
+function PlotBuilder.ToLocal(anchor, worldPosition)
+	local local3 = anchor.CFrame:PointToObjectSpace(worldPosition)
 	return local3.X, local3.Z
 end
 
--- Помещается ли точка внутри участка с отступом от забора
-function PlotBuilder.IsInside(floor, x, z)
-	local halfX = floor.Size.X / 2 - P.PlaceMargin
-	local halfZ = floor.Size.Z / 2 - P.PlaceMargin
-	return math.abs(x) <= halfX and math.abs(z) <= halfZ
+-- Габарит модели или детали: CFrame центра и размер
+local function boxOf(instance)
+	if instance:IsA("Model") then
+		local ok, cframe, size = pcall(function()
+			return instance:GetBoundingBox()
+		end)
+		if ok then
+			return cframe, size
+		end
+		return instance:GetPivot(), Vector3.zero
+	end
+	return instance.CFrame, instance.Size
 end
 
--- Загоняет точку внутрь участка (на случай, если участок оказался меньше)
-function PlotBuilder.Clamp(floor, x, z)
-	local halfX = math.max(0, floor.Size.X / 2 - P.PlaceMargin)
-	local halfZ = math.max(0, floor.Size.Z / 2 - P.PlaceMargin)
-	return math.clamp(x, -halfX, halfX), math.clamp(z, -halfZ, halfZ)
+-- Звено забора: где у него центр относительно точки привязки, какая сторона длинная
+-- и какой он толщины
+local function segmentInfo(template)
+	local boxCFrame, size = boxOf(template)
+	local info = {
+		Template = template,
+		PivotToBox = template:GetPivot():ToObjectSpace(boxCFrame),
+		Turn = CFrame.new(),
+		Length = size.X,
+		Thickness = size.Z,
+		Height = size.Y,
+	}
+	-- Длинная сторона вдоль Z — считаем звено повёрнутым на 90°, чтобы она шла вдоль X
+	if size.Z > size.X then
+		info.Turn = CFrame.Angles(0, math.rad(90), 0)
+		info.Length = size.Z
+		info.Thickness = size.X
+	end
+	return info
+end
+
+-- Звенья забора из ReplicatedStorage.Assets.Fences (читаются один раз).
+-- Число в конце имени — с какого уровня базы звено используется (Fence0, Fence5...);
+-- без числа — с уровня 0. Если звено одно, оно на всех уровнях.
+local segmentCache
+
+local function segments()
+	if segmentCache then
+		return segmentCache
+	end
+	segmentCache = {}
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local folder = assets and assets:FindFirstChild("Fences")
+	for _, child in ipairs(folder and folder:GetChildren() or {}) do
+		if child:IsA("Model") or child:IsA("BasePart") then
+			local info = segmentInfo(child)
+			if info.Length >= 1 then
+				info.MinLevel = tonumber(string.match(child.Name, "(%d+)$")) or 0
+				table.insert(segmentCache, info)
+			else
+				warn("[PlotBuilder] Звено забора " .. child:GetFullName() .. " слишком короткое или пустое — пропускаем")
+			end
+		end
+	end
+	return segmentCache
+end
+
+-- Звено для уровня: с самым большим числом, до которого база доросла
+local function pickSegment(level)
+	local best, lowest
+	for _, info in ipairs(segments()) do
+		if level >= info.MinLevel and (not best or info.MinLevel > best.MinLevel) then
+			best = info
+		end
+		if not lowest or info.MinLevel < lowest.MinLevel then
+			lowest = info
+		end
+	end
+	return best or lowest
+end
+
+-- Шаг роста: длина звена уровня 0 (или GrowStep, если звеньев нет)
+local function growStep()
+	local info = pickSegment(0)
+	return info and info.Length or P.GrowStep
+end
+
+local POST_THICKNESS = 0.6 -- толщина столбиков простого забора
+
+-- Насколько центр забора отступает внутрь от края пола: пол выступает
+-- за внешнюю сторону забора на FloorOverhang студов
+local function fenceInset(info)
+	local thickness = info and info.Thickness or POST_THICKNESS
+	return P.FloorOverhang + thickness / 2
+end
+
+-- До какого уровня участок растёт
+local function growLevel(level)
+	return math.clamp(level, 0, math.min(P.GrowMaxLevel, Formulas.MaxBaseLevel()))
+end
+
+-- Прямоугольник участка на уровне level в осях Frame (его +Z смотрит на вход):
+-- minX, maxX, minZ, maxZ. Передний край (maxZ) стоит на месте.
+local function bounds(shape, level)
+	local step = growStep()
+	local grow = growLevel(level)
+	local side = grow * P.GrowSideSegments * step
+	local depth = grow * P.GrowDepthSegments * step
+	return -shape.HalfX - side, shape.HalfX + side, -shape.HalfZ - depth, shape.HalfZ
+end
+
+local shapes = {} -- [plotModel] = форма участка
+
+-- Форма участка: исходный пол, где вход и размер на уровне 0.
+-- Запоминается один раз, ДО того как пол начнёт расти.
+local function getShape(plotModel)
+	local shape = shapes[plotModel]
+	if shape then
+		return shape
+	end
+	local floor = PlotBuilder.GetFloor(plotModel)
+	if not floor then
+		return nil
+	end
+	local cf = floor.CFrame
+	local halfX, halfZ = floor.Size.X / 2, floor.Size.Z / 2
+
+	-- Где вход: сторона пола, ближайшая к Spawn (или к табличке).
+	-- Frame поворачиваем так, чтобы его +Z смотрел на вход.
+	local angle = 0
+	local marker = PlotBuilder.ResolvePart(plotModel:FindFirstChild("Spawn", true))
+		or PlotBuilder.ResolvePart(plotModel:FindFirstChild("Sign", true))
+	if marker then
+		local p = cf:PointToObjectSpace(marker.Position)
+		if math.abs(p.X) / halfX > math.abs(p.Z) / halfZ then
+			angle = p.X > 0 and 90 or -90
+		else
+			angle = p.Z >= 0 and 0 or 180
+		end
+	end
+	local sideways = angle == 90 or angle == -90
+
+	shape = {
+		Floor = floor,
+		-- Якорь: исходный пол. Похож на деталь (есть CFrame и Size), поэтому
+		-- годится для ToLocal и PlaceModel
+		Anchor = { CFrame = cf, Size = floor.Size },
+		Frame = cf * CFrame.Angles(0, math.rad(angle), 0),
+		HalfX = sideways and halfZ or halfX,
+		HalfZ = sideways and halfX or halfZ,
+		SizeY = floor.Size.Y,
+	}
+	shapes[plotModel] = shape
+
+	-- Подсказка автору: насколько вырастет участок, чтобы оставить место между участками
+	local minX, maxX, minZ, maxZ = bounds(shape, math.huge)
+	print(string.format("[PlotBuilder] %s: пол %.0f x %.0f, на максимуме %.0f x %.0f (вширь x вглубь, шаг %.1f)",
+		plotModel.Name, shape.HalfX * 2, shape.HalfZ * 2, maxX - minX, maxZ - minZ, growStep()))
+
+	-- И какого размера сделать пол, чтобы звенья вставали ровно, без нахлёста
+	local info = pickSegment(0)
+	if info then
+		local inset = fenceInset(info)
+		local function ideal(length)
+			local count = math.max(1, math.floor((length - 2 * inset) / info.Length + 0.5))
+			return count * info.Length + 2 * inset
+		end
+		local idealX, idealZ = ideal(shape.HalfX * 2), ideal(shape.HalfZ * 2)
+		if math.abs(idealX - shape.HalfX * 2) > 0.05 or math.abs(idealZ - shape.HalfZ * 2) > 0.05 then
+			print(string.format("[PlotBuilder] %s: чтобы звенья забора встали ровно, сделай Floor %.2f x %.2f"
+				.. " (вширь x вглубь, звено %.2f, толщина %.2f)",
+				plotModel.Name, idealX, idealZ, info.Length, info.Thickness))
+		end
+	end
+	return shape
+end
+
+-- Якорь участка — исходный пол из Studio. От него считаются координаты предметов.
+function PlotBuilder.GetAnchor(plotModel)
+	local shape = getShape(plotModel)
+	return shape and shape.Anchor
+end
+
+-- Помещается ли точка (x, z от якоря) внутри участка уровня level с отступом от забора
+function PlotBuilder.IsInsidePlot(plotModel, level, x, z)
+	local shape = getShape(plotModel)
+	if not shape then
+		return false
+	end
+	local world = shape.Anchor.CFrame:PointToWorldSpace(Vector3.new(x, 0, z))
+	local p = shape.Frame:PointToObjectSpace(world)
+	local minX, maxX, minZ, maxZ = bounds(shape, level)
+	-- Отступ считаем от ВНУТРЕННЕЙ стороны забора: край пола, свес пола, толщина забора
+	local info = pickSegment(level)
+	local margin = fenceInset(info) + (info and info.Thickness or POST_THICKNESS) / 2 + P.PlaceMargin
+	return p.X >= minX + margin and p.X <= maxX - margin
+		and p.Z >= minZ + margin and p.Z <= maxZ - margin
+end
+
+-- Пол растягивается на весь участок текущего уровня
+local function resizeFloor(shape, minX, maxX, minZ, maxZ)
+	local floor = shape.Floor
+	floor.Size = Vector3.new(maxX - minX, shape.SizeY, maxZ - minZ)
+	floor.CFrame = shape.Frame * CFrame.new((minX + maxX) / 2, 0, (minZ + maxZ) / 2)
 end
 
 ---------------------------------------------------------------------
 -- Забор
 ---------------------------------------------------------------------
+
+-- Стороны участка в осях Frame: откуда, куда и в какую сторону "наружу"
+local function sides(minX, maxX, minZ, maxZ)
+	return {
+		{ From = Vector3.new(minX, 0, maxZ), To = Vector3.new(maxX, 0, maxZ), Out = Vector3.new(0, 0, 1) },  -- перед
+		{ From = Vector3.new(maxX, 0, minZ), To = Vector3.new(minX, 0, minZ), Out = Vector3.new(0, 0, -1) }, -- зад
+		{ From = Vector3.new(minX, 0, minZ), To = Vector3.new(minX, 0, maxZ), Out = Vector3.new(-1, 0, 0) }, -- левый бок
+		{ From = Vector3.new(maxX, 0, maxZ), To = Vector3.new(maxX, 0, minZ), Out = Vector3.new(1, 0, 0) },  -- правый бок
+	}
+end
+
+-- Забор из звеньев автора по всему периметру. Звенья идут вплотную; если сторона
+-- не делится на длину звена ровно, звенья чуть заходят друг на друга — без щелей.
+local function buildSegmentFence(plotModel, shape, info, minX, maxX, minZ, maxZ)
+	local fence = Instance.new("Model")
+	fence.Name = "AutoFence"
+	local up = Vector3.yAxis
+	local top = shape.SizeY / 2 -- верх пола в осях Frame
+	for _, side in ipairs(sides(minX, maxX, minZ, maxZ)) do
+		local length = (side.To - side.From).Magnitude
+		local count = math.max(1, math.ceil(length / info.Length - 0.01))
+		local step = length / count
+		local along = (side.To - side.From).Unit
+		for i = 1, count do
+			local center = side.From + along * (step * (i - 0.5)) + Vector3.new(0, top + info.Height / 2, 0)
+			-- Длинная сторона звена — вдоль края, лицевая сторона (Front) — наружу
+			local target = CFrame.fromMatrix(center, up:Cross(-side.Out), up, -side.Out)
+			local box = shape.Frame * target * info.Turn:Inverse()
+			local segment = info.Template:Clone()
+			segment:PivotTo(box * info.PivotToBox:Inverse())
+			for _, part in ipairs(segment:IsA("BasePart") and { segment } or segment:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+				end
+			end
+			segment.Parent = fence
+		end
+	end
+	fence.Parent = plotModel
+	return fence
+end
 
 local function styleForLevel(level)
 	local best = P.FenceStyles[1]
@@ -182,50 +422,31 @@ local function styleForLevel(level)
 	return best
 end
 
--- Строит простой забор из столбиков по краю пола, с проходом у Spawn
-local function buildSimpleFence(plotModel, floor, style)
-	local old = plotModel:FindFirstChild("SimpleFence")
-	if old then
-		old:Destroy()
-	end
-
+-- Простой забор из столбиков по краю участка (пока нет своего звена)
+local function buildSimpleFence(plotModel, shape, style, minX, maxX, minZ, maxZ)
 	local fence = Instance.new("Model")
 	fence.Name = "SimpleFence"
-
-	local top = floor.Size.Y / 2
-	local halfX, halfZ = floor.Size.X / 2, floor.Size.Z / 2
-	local step = 4
-
-	local function post(x, z)
-		-- Проход у ближнего края (там, где Spawn)
-		if z > halfZ - 0.1 and math.abs(x) < 6 then
-			return
+	local top = shape.SizeY / 2
+	local spacing = 4
+	for _, side in ipairs(sides(minX, maxX, minZ, maxZ)) do
+		local length = (side.To - side.From).Magnitude
+		local count = math.max(1, math.floor(length / spacing))
+		for i = 0, count - 1 do
+			local point = side.From + (side.To - side.From) * (i / count)
+			local cframe = shape.Frame * CFrame.new(point + Vector3.new(0, top + style.Height / 2, 0))
+			local part = makePart("Post", Vector3.new(0.6, style.Height, 0.6), cframe, style.Color, fence)
+			part.Material = style.Material
+			part.CanCollide = false
 		end
-		local cframe = floor.CFrame * CFrame.new(x, top + style.Height / 2, z)
-		local part = makePart("Post", Vector3.new(0.6, style.Height, 0.6), cframe, style.Color, fence)
-		part.Material = style.Material
-		part.CanCollide = false
 	end
-
-	local x = -halfX
-	while x <= halfX do
-		post(x, -halfZ)
-		post(x, halfZ)
-		x = x + step
-	end
-	local z = -halfZ + step
-	while z <= halfZ - step do
-		post(-halfX, z)
-		post(halfX, z)
-		z = z + step
-	end
-
 	fence.Parent = plotModel
+	return fence
 end
 
--- Заборы автора каждого участка: [plotModel] = { Folder, List = { { Fence, MinLevel } } }.
--- Список запоминаем один раз: спрятанный забор лежит вне папки Fences,
--- и найти его там уже нельзя.
+-- Старый способ: целые заборы автора внутри участка (папка Fences: Fence0, Fence3...).
+-- Под растущий участок не подходит — оставлен на случай, если звена нет.
+-- [plotModel] = { Folder, List = { { Fence, MinLevel } } }. Список запоминаем один раз:
+-- спрятанный забор лежит вне папки Fences, и найти его там уже нельзя.
 local fenceSets = {}
 
 local function getFenceSet(plotModel)
@@ -257,39 +478,75 @@ local function getFenceSet(plotModel)
 	return set
 end
 
--- Показывает забор, который соответствует уровню участка
+-- Подгоняет участок под уровень базы: растит пол и строит забор по периметру.
+-- Забор перестраивается, только если размер или звено поменялись.
 function PlotBuilder.UpdateFence(plotModel, level)
-	local set = getFenceSet(plotModel)
+	local shape = getShape(plotModel)
+	if not shape then
+		return
+	end
+	local minX, maxX, minZ, maxZ = bounds(shape, level)
+	resizeFloor(shape, minX, maxX, minZ, maxZ)
+
+	local info = pickSegment(level)
+	local set = not info and getFenceSet(plotModel)
 	if set and #set.List > 0 then
-		-- Свои заборы автора: Fence0, Fence3, Fence7... Берём тот, у которого
-		-- число самое большое, но не больше уровня участка.
+		-- Свои целые заборы автора: Fence0, Fence3, Fence7... Берём тот, у которого
+		-- число самое большое, но не больше уровня участка. Остальные убираем из мира.
 		local best
 		for _, entry in ipairs(set.List) do
 			if level >= entry.MinLevel and (not best or entry.MinLevel > best.MinLevel) then
 				best = entry
 			end
 		end
-		-- Нужный забор кладём в папку Fences, остальные убираем из мира совсем.
-		-- Прозрачность не годится: не прячет саму деталь, текстуры и столкновения.
 		for _, entry in ipairs(set.List) do
 			entry.Fence.Parent = (entry == best) and set.Folder or nil
 		end
 		return
 	end
 
-	local floor = PlotBuilder.GetFloor(plotModel)
-	if floor then
-		buildSimpleFence(plotModel, floor, styleForLevel(level))
+	if info then
+		-- Забор строится сам из звена — старые заборы внутри участка больше не нужны
+		local oldFolder = plotModel:FindFirstChild("Fences")
+		if oldFolder then
+			oldFolder.Parent = nil
+			warn("[PlotBuilder] " .. plotModel.Name .. ": забор теперь строится сам из звена"
+				.. " в ReplicatedStorage.Assets.Fences — удали папку Fences из участка в Studio")
+		end
 	end
+
+	local style = styleForLevel(level)
+	local key = (info and info.Template:GetFullName() or ("posts" .. style.MinLevel))
+		.. string.format("|%.2f|%.2f|%.2f|%.2f", minX, maxX, minZ, maxZ)
+	if shape.FenceKey == key and shape.Fence and shape.Fence.Parent then
+		return
+	end
+	if shape.Fence then
+		shape.Fence:Destroy()
+	end
+	-- Забор стоит внутри пола: пол выступает за его внешнюю сторону на FloorOverhang
+	local inset = fenceInset(info)
+	local fMinX, fMaxX, fMinZ, fMaxZ = minX + inset, maxX - inset, minZ + inset, maxZ - inset
+	if info then
+		shape.Fence = buildSegmentFence(plotModel, shape, info, fMinX, fMaxX, fMinZ, fMaxZ)
+	else
+		shape.Fence = buildSimpleFence(plotModel, shape, style, fMinX, fMaxX, fMinZ, fMaxZ)
+	end
+	shape.FenceKey = key
+end
+
+-- Самый широкий участок на максимальном уровне (для расстановки временных участков)
+local function maxGrowWidth(floorWidth)
+	return floorWidth + 2 * growLevel(math.huge) * P.GrowSideSegments * growStep()
 end
 
 ---------------------------------------------------------------------
 -- Временные участки
 ---------------------------------------------------------------------
 
-local function buildTempPlot(index, parent)
+local function buildTempPlot(index, parent, spacing)
 	local size = P.TempFloorSize
-	local offsetX = (index - 1 - (P.TempCount - 1) / 2) * P.TempSpacing
+	local offsetX = (index - 1 - (P.TempCount - 1) / 2) * spacing
 	local origin = P.TempOrigin + Vector3.new(offsetX, 0, 0)
 
 	local model = Instance.new("Model")
@@ -325,8 +582,10 @@ function PlotBuilder.EnsurePlots()
 
 	local folder = Instance.new("Folder")
 	folder.Name = "Plots"
+	-- Участки растут вширь: ставим их так, чтобы и на максимуме не наезжали друг на друга
+	local spacing = math.max(P.TempSpacing, maxGrowWidth(P.TempFloorSize.X) + 6)
 	for i = 1, P.TempCount do
-		buildTempPlot(i, folder)
+		buildTempPlot(i, folder, spacing)
 	end
 	folder.Parent = workspace
 	warn("[PlotBuilder] В Workspace нет папки Plots — построены временные участки (" .. P.TempCount .. " шт.)")
