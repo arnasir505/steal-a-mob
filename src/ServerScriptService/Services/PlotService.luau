@@ -161,6 +161,7 @@ local function renderItem(entry, id, placed)
 	store.GamepadKeyCode = Enum.KeyCode.ButtonX
 	store.RequiresLineOfSight = false
 	store.MaxActivationDistance = reach
+	PlotBuilder.MakeOwnerOnly(store)
 	store.Parent = anchor
 	store.Triggered:Connect(function(player)
 		PlotService.Store(player, id, entry)
@@ -176,6 +177,7 @@ local function renderItem(entry, id, placed)
 	sell.RequiresLineOfSight = false
 	sell.MaxActivationDistance = reach
 	sell.UIOffset = Vector2.new(0, 60)
+	PlotBuilder.MakeOwnerOnly(sell)
 	sell.Parent = anchor
 	sell.Triggered:Connect(function(player)
 		PlotService.Sell(player, id, entry)
@@ -198,7 +200,8 @@ local function updateSign(entry, data)
 			.. "  (+" .. GameConfig.Base.SlotsPerLevel .. " slots)")
 	end
 	if entry.UpgradePrompt then
-		entry.UpgradePrompt.Enabled = data.BaseLevel < maxLevel
+		-- Enabled не трогаем: им управляет клиент (OwnerOnly.client.luau)
+		entry.UpgradePrompt:SetAttribute("Available", data.BaseLevel < maxLevel)
 		entry.UpgradePrompt.ObjectText = data.BaseLevel < maxLevel
 			and ("$" .. Format.Number(Formulas.BaseUpgradeCost(data.BaseLevel)))
 			or "Max level"
@@ -503,6 +506,7 @@ local function claimPlot(player, data)
 
 	entry.Owner = player
 	byPlayer[player] = entry
+	PlotBuilder.SetPlotOwner(entry.Model, player)
 	player:SetAttribute("PlotName", entry.Model.Name)
 	player:SetAttribute("Slots", capacity(data))
 	SpeedService.SetTreadmill(player, PlotBuilder.GetTreadmillSurface(entry.Model))
@@ -533,14 +537,12 @@ local function releasePlot(player)
 	end
 	entry.Owner = nil
 	byPlayer[player] = nil
+	PlotBuilder.SetPlotOwner(entry.Model, nil)
 	SpeedService.SetTreadmill(player, nil)
 	PlotBuilder.SetTreadmillText(entry.Model, "")
 	PlotBuilder.UpdateFence(entry.Model, 0)
 	PlotBuilder.SetSignText(entry.Model, "Empty Base")
 	PlotBuilder.SetUpgradeText(entry.Model, "")
-	if entry.UpgradePrompt then
-		entry.UpgradePrompt.Enabled = false
-	end
 end
 
 ---------------------------------------------------------------------
@@ -636,7 +638,7 @@ local function setupUpgradePrompt(entry)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.MaxActivationDistance = 8
-	prompt.Enabled = false
+	PlotBuilder.MakeOwnerOnly(prompt)
 	prompt.Parent = part
 	prompt.Triggered:Connect(function(player)
 		if byPlayer[player] == entry then
@@ -661,6 +663,7 @@ local function setupTreadmillPrompt(entry)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.MaxActivationDistance = 8
+	PlotBuilder.MakeOwnerOnly(prompt)
 	prompt.Parent = part
 	prompt.Triggered:Connect(function(player)
 		if byPlayer[player] ~= entry then
@@ -701,6 +704,7 @@ function PlotService.Init()
 				Models = {},
 				Labels = {},
 			}
+			PlotBuilder.SetPlotOwner(model, nil)
 			setupUpgradePrompt(entry)
 			setupTreadmillPrompt(entry)
 			PlotBuilder.UpdateFence(model, 0)

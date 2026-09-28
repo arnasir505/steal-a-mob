@@ -249,19 +249,18 @@ function SpeedService.UpgradeTreadmill(player)
 	return true
 end
 
--- Текст на табличке дорожки
+-- Текст на табличке дорожки: уровень и прибавка (видят все), цена улучшения (видит хозяин)
 function SpeedService.GetTreadmillText(player)
 	local data = DataService.Get(player)
 	if not data then
-		return ""
+		return "", ""
 	end
 	local gain = SpeedService.GetTreadmillGain(player)
+	local text = "Treadmill Lv." .. data.TreadmillLevel .. "\n+" .. Format.Number(gain) .. " speed/s"
 	if data.TreadmillLevel >= T.MaxLevel then
-		return "Treadmill Lv." .. data.TreadmillLevel .. "\n+" .. Format.Number(gain) .. " speed/s"
+		return text, ""
 	end
-	return "Treadmill Lv." .. data.TreadmillLevel
-		.. "\n+" .. Format.Number(gain) .. " speed/s"
-		.. "\nUpgrade: $" .. Format.Number(Formulas.TreadmillUpgradeCost(data.TreadmillLevel))
+	return text, "Upgrade: $" .. Format.Number(Formulas.TreadmillUpgradeCost(data.TreadmillLevel))
 end
 
 ---------------------------------------------------------------------

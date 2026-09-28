@@ -36,6 +36,7 @@
 --   ReplicatedStorage.Assets.Eggs.<EggModelName>, .Mobs.<ModelName>
 --   У каждой модели обязательно должен быть выставлен PrimaryPart.
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
@@ -66,13 +67,36 @@ local function makePart(name, size, cframe, color, parent)
 	return part
 end
 
-local function makeLabel(parent, name, size, offset, maxDistance)
+---------------------------------------------------------------------
+-- Только для хозяина
+---------------------------------------------------------------------
+
+-- Кнопки и надписи, которые видит только хозяин участка (Store/Sell, улучшения, цены).
+-- Сервер создаёт их выключенными и помечает тегом, а клиент (OwnerOnly.client.luau)
+-- включает у себя только то, что стоит на его участке. Хозяина клиент берёт
+-- из атрибута OwnerUserId у модели участка (0 — участок свободен).
+-- Нажать чужую кнопку всё равно нельзя: сервер сам проверяет, чей участок.
+local OWNER_ONLY_TAG = "OwnerOnly"
+
+-- Вызывать ДО того, как положить объект в участок: иначе чужие игроки
+-- на мгновение увидят его включённым
+function PlotBuilder.MakeOwnerOnly(instance)
+	instance.Enabled = false
+	CollectionService:AddTag(instance, OWNER_ONLY_TAG)
+end
+
+function PlotBuilder.SetPlotOwner(plotModel, player)
+	plotModel:SetAttribute("OwnerUserId", player and player.UserId or 0)
+end
+
+local function makeLabel(parent, name, size, offset, maxDistance, ownerOnly)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = name
 	gui.Size = size
 	gui.StudsOffset = offset
 	gui.MaxDistance = maxDistance
 	gui.AlwaysOnTop = false
+	gui:SetAttribute("GameLabel", true) -- своя надпись игры, не автора (см. findLabel)
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -85,6 +109,9 @@ local function makeLabel(parent, name, size, offset, maxDistance)
 	label.Text = ""
 	label.Parent = gui
 
+	if ownerOnly then
+		PlotBuilder.MakeOwnerOnly(gui)
+	end
 	gui.Parent = parent
 	return label
 end
@@ -423,7 +450,8 @@ local function findLabel(holder)
 	end
 	local named, single, count = nil, nil, 0
 	for _, descendant in ipairs(holder:GetDescendants()) do
-		if descendant:IsA("TextLabel") then
+		-- Надписи, которые повесила сама игра, — не авторские, пропускаем
+		if descendant:IsA("TextLabel") and not descendant.Parent:GetAttribute("GameLabel") then
 			count = count + 1
 			single = single or descendant
 			if descendant.Name == "Label" then
@@ -443,7 +471,8 @@ end
 -- Пишет текст на табличку. Если автор сделал свою надпись (SurfaceGui с TextLabel) —
 -- пишем в неё. Если нет — вешаем свою BillboardGui над деталью.
 -- ownOnly = true: чужую надпись не трогать (чтобы две разные надписи не дрались за один TextLabel).
-local function setLabelText(holder, guiName, text, size, offset, maxDistance, ownOnly)
+-- ownerOnly = true: надпись видит только хозяин участка (см. MakeOwnerOnly).
+local function setLabelText(holder, guiName, text, size, offset, maxDistance, ownOnly, ownerOnly)
 	if not holder then
 		return
 	end
@@ -456,7 +485,7 @@ local function setLabelText(holder, guiName, text, size, offset, maxDistance, ow
 		local gui = part:FindFirstChild(guiName)
 		label = gui and gui:FindFirstChild("Label")
 		if not label then
-			label = makeLabel(part, guiName, size, offset, maxDistance)
+			label = makeLabel(part, guiName, size, offset, maxDistance, ownerOnly)
 		end
 	end
 	label.Text = text
@@ -469,14 +498,20 @@ end
 
 -- Цена улучшения висит над табличкой Sign. Пишем СВОЕЙ надписью,
 -- а не в надпись автора на табличке, иначе затрём имя владельца.
+-- Видит её только хозяин участка.
 function PlotBuilder.SetUpgradeText(plotModel, text)
 	setLabelText(plotModel:FindFirstChild("Sign", true), "UpgradeSign",
-		text, UDim2.fromScale(9, 2.5), Vector3.new(0, 5, 0), 120, true)
+		text, UDim2.fromScale(9, 2.5), Vector3.new(0, 5, 0), 120, true, true)
 end
 
-function PlotBuilder.SetTreadmillText(plotModel, text)
-	setLabelText(plotModel:FindFirstChild("Treadmill", true), "TreadmillSign",
+-- text — уровень и прибавка скорости (видят все),
+-- upgradeText — цена улучшения над ними (видит только хозяин)
+function PlotBuilder.SetTreadmillText(plotModel, text, upgradeText)
+	local treadmill = plotModel:FindFirstChild("Treadmill", true)
+	setLabelText(treadmill, "TreadmillSign",
 		text, UDim2.fromScale(9, 2.5), Vector3.new(0, 4, 0), 120, false)
+	setLabelText(treadmill, "TreadmillUpgrade",
+		upgradeText or "", UDim2.fromScale(9, 1), Vector3.new(0, 5.9, 0), 120, true, true)
 end
 
 -- Подпись над поставленным предметом
