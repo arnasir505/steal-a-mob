@@ -102,13 +102,6 @@ function SpeedService.GetTreadmillGain(player)
 	return Formulas.TreadmillGain(data.TreadmillLevel, SpeedService.TrainingMultiplier(player))
 end
 
-function SpeedService.SetTreadmill(player, surface)
-	if not surface then
-		SpeedService.LeaveTreadmill(player)
-	end
-	treadmills[player] = surface
-end
-
 -- Стоит ли игрок на своей дорожке
 local function isOnTreadmill(player)
 	local surface = treadmills[player]
@@ -195,6 +188,20 @@ local function enterTreadmill(player)
 	state.Track = playRunAnimation(player, humanoid)
 	standing[player] = state
 	player:SetAttribute("OnTreadmill", true)
+end
+
+-- Дорожка игрока (поверхность из PlotBuilder.GetTreadmillSurface). nil — дорожки нет.
+-- Модель дорожки сменилась (улучшение), пока игрок на ней бежит, —
+-- переставляем его на новое полотно.
+function SpeedService.SetTreadmill(player, surface)
+	if not surface then
+		SpeedService.LeaveTreadmill(player)
+	end
+	treadmills[player] = surface
+	if surface and player:GetAttribute("OnTreadmill") then
+		stopAnimation(player)
+		enterTreadmill(player)
+	end
 end
 
 -- Снимает игрока с дорожки: спрыгнул, вышел, умер или потерял участок

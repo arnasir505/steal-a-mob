@@ -49,6 +49,8 @@ local plots = {}      -- список участков
 local byPlayer = {}   -- [player] = участок
 local lastPlaceAt = {} -- [player] = время последней постановки
 
+local setupTreadmillPrompt -- объявлена ниже, в разделе "Запуск"
+
 ---------------------------------------------------------------------
 -- Данные участка
 ---------------------------------------------------------------------
@@ -490,6 +492,20 @@ function PlotService.SendHome(player)
 	end
 end
 
+-- Модель дорожки под её уровень (ReplicatedStorage.Assets.Treadmills).
+-- Если модель сменилась — вешаем кнопку улучшения на новую модель
+-- и говорим SpeedService, где теперь полотно.
+local function refreshTreadmill(entry, level)
+	if not PlotBuilder.UpdateTreadmill(entry.Model, level) then
+		return
+	end
+	setupTreadmillPrompt(entry)
+	if entry.Owner then
+		SpeedService.SetTreadmill(entry.Owner, PlotBuilder.GetTreadmillSurface(entry.Model))
+		PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(entry.Owner))
+	end
+end
+
 local function claimPlot(player, data)
 	local entry
 	for _, candidate in ipairs(plots) do
@@ -509,6 +525,13 @@ local function claimPlot(player, data)
 	PlotBuilder.SetPlotOwner(entry.Model, player)
 	player:SetAttribute("PlotName", entry.Model.Name)
 	player:SetAttribute("Slots", capacity(data))
+
+	-- Модель дорожки — под уровень игрока, и меняется при улучшении
+	-- (атрибут TreadmillLevel ставит SpeedService, а в Studio — и команда !treadmill)
+	refreshTreadmill(entry, data.TreadmillLevel)
+	entry.TreadmillConnection = player:GetAttributeChangedSignal("TreadmillLevel"):Connect(function()
+		refreshTreadmill(entry, player:GetAttribute("TreadmillLevel") or 0)
+	end)
 	SpeedService.SetTreadmill(player, PlotBuilder.GetTreadmillSurface(entry.Model))
 	PlotBuilder.SetTreadmillText(entry.Model, SpeedService.GetTreadmillText(player))
 	renderPlot(entry)
@@ -532,6 +555,10 @@ local function releasePlot(player)
 		entry.CharacterConnection:Disconnect()
 		entry.CharacterConnection = nil
 	end
+	if entry.TreadmillConnection then
+		entry.TreadmillConnection:Disconnect()
+		entry.TreadmillConnection = nil
+	end
 	for id in pairs(entry.Models) do
 		clearItemVisual(entry, id)
 	end
@@ -539,6 +566,7 @@ local function releasePlot(player)
 	byPlayer[player] = nil
 	PlotBuilder.SetPlotOwner(entry.Model, nil)
 	SpeedService.SetTreadmill(player, nil)
+	refreshTreadmill(entry, 0) -- свободный участок — снова дорожка уровня 0
 	PlotBuilder.SetTreadmillText(entry.Model, "")
 	PlotBuilder.UpdateFence(entry.Model, 0)
 	PlotBuilder.SetSignText(entry.Model, "Empty Base")
@@ -650,9 +678,11 @@ local function setupUpgradePrompt(entry)
 	entry.UpgradePrompt = prompt
 end
 
-local function setupTreadmillPrompt(entry)
+-- Кнопка улучшения дорожки. Вызывается и при смене модели дорожки:
+-- у модели уровня 0 кнопка могла остаться с прошлого раза — второй не делаем.
+function setupTreadmillPrompt(entry)
 	local part = PlotBuilder.GetTreadmill(entry.Model)
-	if not part then
+	if not part or part:FindFirstChild("TreadmillPrompt") then
 		return
 	end
 	local prompt = Instance.new("ProximityPrompt")

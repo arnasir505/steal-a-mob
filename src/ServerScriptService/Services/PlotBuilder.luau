@@ -16,6 +16,8 @@
 --              То же правило у Treadmill.
 --   Treadmill— необязательно. Беговая дорожка: игрок встаёт на неё, прилипает,
 --              бежит на месте и получает скорость. Спрыгивает пробелом.
+--              Это модель уровня 0 и место дорожки. Модели следующих уровней —
+--              в ReplicatedStorage.Assets.Treadmills (см. PlotBuilder.UpdateTreadmill).
 --              Внутри можно сделать "Treadmill_Floor" (деталь или модель) —
 --              это полотно, по нему считается, где стоит игрок и куда он смотрит.
 --              Если его нет, берётся вся модель дорожки.
@@ -683,6 +685,94 @@ function PlotBuilder.GetTreadmillSurface(plotModel)
 		Forward = forward.Unit,
 		Part = PlotBuilder.ResolvePart(treadmill),
 	}
+end
+
+-- Модели дорожки по уровням. Дорожка в участке (Plot.Treadmill) — модель уровня 0
+-- и заодно место, где стоит дорожка. Модели следующих уровней лежат в
+-- ReplicatedStorage.Assets.Treadmills: Treadmill5, Treadmill10, ... — число
+-- в имени = с какого уровня дорожки показывать модель. Новая модель встаёт
+-- туда же: её точка привязки (Pivot / PrimaryPart) совмещается с точкой привязки
+-- дорожки из участка. Поэтому у всех моделей PrimaryPart лучше сделать полотном
+-- Treadmill_Floor — тогда полотно встанет ровно на место.
+local treadmillTemplateCache
+
+local function treadmillTemplates()
+	if treadmillTemplateCache then
+		return treadmillTemplateCache
+	end
+	treadmillTemplateCache = {}
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local folder = assets and assets:FindFirstChild("Treadmills")
+	for _, child in ipairs(folder and folder:GetChildren() or {}) do
+		if child:IsA("Model") or child:IsA("BasePart") then
+			local minLevel = tonumber(string.match(child.Name, "(%d+)$"))
+			if not minLevel then
+				warn("[PlotBuilder] Модель дорожки " .. child:GetFullName()
+					.. ": в имени нет числа уровня (нужно Treadmill5, Treadmill10...) — пропускаем")
+			else
+				if not child:FindFirstChild("Treadmill_Floor", true) then
+					warn("[PlotBuilder] В модели дорожки " .. child:GetFullName() .. " нет Treadmill_Floor —"
+						.. " игрок встанет на верх всей модели. Назови полотно Treadmill_Floor.")
+				end
+				table.insert(treadmillTemplateCache, { Template = child, MinLevel = minLevel })
+			end
+		end
+	end
+	return treadmillTemplateCache
+end
+
+-- [plotModel] = { Base = дорожка из участка, Parent, Pivot, Current = показанная модель, Key }
+local treadmillSets = {}
+
+-- Показывает модель дорожки под её уровень. Возвращает true, если модель сменилась
+-- (тогда кнопку улучшения и полотно для SpeedService надо обновить).
+function PlotBuilder.UpdateTreadmill(plotModel, level)
+	local set = treadmillSets[plotModel]
+	if not set then
+		local base = plotModel:FindFirstChild("Treadmill", true)
+		if not base then
+			return false
+		end
+		set = { Base = base, Parent = base.Parent, Pivot = base:GetPivot(), Current = base, Key = "base" }
+		treadmillSets[plotModel] = set
+	end
+
+	local best
+	for _, entry in ipairs(treadmillTemplates()) do
+		if level >= entry.MinLevel and (not best or entry.MinLevel > best.MinLevel) then
+			best = entry
+		end
+	end
+	local key = best and best.Template:GetFullName() or "base"
+	if key == set.Key then
+		return false
+	end
+
+	-- Дорожку из участка не удаляем, а убираем из мира: она понадобится,
+	-- когда участок освободится и уровень снова станет 0
+	if set.Current == set.Base then
+		set.Base.Parent = nil
+	else
+		set.Current:Destroy()
+	end
+
+	if best then
+		local model = best.Template:Clone()
+		model.Name = "Treadmill"
+		model:PivotTo(set.Pivot)
+		for _, part in ipairs(model:IsA("BasePart") and { model } or model:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Anchored = true
+			end
+		end
+		model.Parent = set.Parent
+		set.Current = model
+	else
+		set.Base.Parent = set.Parent
+		set.Current = set.Base
+	end
+	set.Key = key
+	return true
 end
 
 -- Папка, куда складываются поставленные яйца и мобы

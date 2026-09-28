@@ -607,7 +607,16 @@ local function onChatted(player, message)
 		print(HttpService:JSONEncode(DataService.Get(player)))
 	elseif command == "wipe" then
 		DataService.ResetForTesting(player)
+		local data = DataService.Get(player)
 		EconomyService.Refresh(player)
+		-- Сервисы узнают об изменениях по атрибутам игрока. Сброс данных их не трогает,
+		-- поэтому обновляем сами — иначе модель дорожки и число мест остались бы старыми
+		if data then
+			player:SetAttribute("TreadmillLevel", data.TreadmillLevel) -- модель дорожки уровня 0
+			player:SetAttribute("Slots", Formulas.BaseSlots(data.BaseLevel))
+		end
+		TrailService.Equip(player, "")   -- снять трейл
+		SwordService.GiveStarter(player) -- начальный меч, как у нового игрока
 		PlotService.RecalcIncome(player)
 		PlotService.RefreshPlot(player)
 		print("Data wiped for", player.Name)
