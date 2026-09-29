@@ -20,11 +20,11 @@
 -- EggScale     — то же самое для модели яйца.
 
 local Mobs = {
-	Chicken = { DisplayName = "Chicken", Biome = "Plains", BaseIncome = 1, SpawnWeight = 1, ModelName = "Chicken", EggModelName = "PlainsEgg", Scale = 1, EggScale = 1 },
-	Pig     = { DisplayName = "Pig",     Biome = "Plains", BaseIncome = 2, SpawnWeight = 1, ModelName = "Pig",     EggModelName = "PlainsEgg", Scale = 1, EggScale = 1 },
-	Sheep   = { DisplayName = "Sheep",   Biome = "Plains", BaseIncome = 3, SpawnWeight = 1, ModelName = "Sheep",   EggModelName = "PlainsEgg", Scale = 1, EggScale = 1 },
-	Cow     = { DisplayName = "Cow",     Biome = "Plains", BaseIncome = 5, SpawnWeight = 1, ModelName = "Cow",     EggModelName = "PlainsEgg", Scale = 1, EggScale = 1 },
-	Horse   = { DisplayName = "Horse",   Biome = "Plains", BaseIncome = 8, SpawnWeight = 1, ModelName = "Horse",   EggModelName = "PlainsEgg", Scale = 1, EggScale = 1 },
+	Chicken = { DisplayName = "Chicken", Biome = "Plains", BaseIncome = 1, SpawnWeight = 1, ModelName = "Chicken", EggModelName = "PlainsEgg", Scale = 1, EggScale = 2.1 },
+	Pig     = { DisplayName = "Pig",     Biome = "Plains", BaseIncome = 2, SpawnWeight = 1, ModelName = "Pig",     EggModelName = "PlainsEgg", Scale = 1, EggScale = 2.1 },
+	Sheep   = { DisplayName = "Sheep",   Biome = "Plains", BaseIncome = 3, SpawnWeight = 1, ModelName = "Sheep",   EggModelName = "PlainsEgg", Scale = 1, EggScale = 2.1 },
+	Cow     = { DisplayName = "Cow",     Biome = "Plains", BaseIncome = 5, SpawnWeight = 1, ModelName = "Cow",     EggModelName = "PlainsEgg", Scale = 1, EggScale = 2.1 },
+	Horse   = { DisplayName = "Horse",   Biome = "Plains", BaseIncome = 8, SpawnWeight = 1, ModelName = "Horse",   EggModelName = "PlainsEgg", Scale = 1, EggScale = 2.1 },
 }
 
 return Mobs

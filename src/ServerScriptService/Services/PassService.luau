@@ -1,6 +1,8 @@
 -- PassService: проверяет, куплен ли у игрока геймпасс.
 --   PassService.Has(player, "X2Money") -> true / false
--- Геймпассы с Id = 0 (ещё не созданные) всегда считаются не купленными.
+-- Геймпассы с Id = 0 (ещё не созданные) считаются не купленными
+-- (кроме тестовой команды !pass в Studio).
+-- Окно покупки открывает ProductService.PromptPass.
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -25,12 +27,15 @@ end
 
 function PassService.Has(player, passName)
 	local pass = Products.GamePasses[passName]
-	if not pass or pass.Id == 0 then
+	if not pass then
 		return false
 	end
 	local playerCache = cache[player]
 	if playerCache and playerCache[passName] ~= nil then
 		return playerCache[passName]
+	end
+	if pass.Id == 0 then
+		return false
 	end
 	local ok, owns = pcall(function()
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, pass.Id)
@@ -40,6 +45,16 @@ function PassService.Has(player, passName)
 		return owns
 	end
 	return false -- при ошибке не запоминаем, проверим в следующий раз
+end
+
+-- Только для тестов в Studio: притвориться, что геймпасс куплен (команда !pass)
+function PassService.GrantForTesting(player, passName)
+	if not Products.GamePasses[passName] then
+		return false
+	end
+	remember(player, passName, true)
+	grantedEvent:Fire(player, passName)
+	return true
 end
 
 function PassService.Init()

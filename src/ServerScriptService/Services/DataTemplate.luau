@@ -53,8 +53,12 @@ return {
 
 	TutorialDone = false,
 
-	-- Номера уже обработанных покупок за Robux (защита от двойной выдачи)
+	-- Номера уже обработанных покупок за Robux (защита от двойной выдачи):
+	-- [PurchaseId] = когда выдано (os.time)
 	ProcessedReceipts = {},
+
+	-- Купленные, но ещё не потраченные мгновенные вылупления
+	InstantHatches = 0,
 
 	-- Время последнего сохранения (для офлайн-дохода)
 	LastOnline = 0,
@@ -63,5 +67,6 @@ return {
 		TotalEarned = 0,
 		EggsStolen = 0,
 		JoinCount = 0,
+		RobuxSpent = 0,
 	},
 }

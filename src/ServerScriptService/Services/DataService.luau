@@ -112,11 +112,15 @@ local function tryLoadAndLock(userId)
 	return ok, status, loaded
 end
 
+-- Возвращает true, только если данные действительно записаны
+-- (важно для покупок за Robux: их подтверждаем только после записи)
 local function save(player, data, releaseLock)
 	local userId = player.UserId
 	data.LastOnline = os.time()
+	local written = false
 	local ok, err = withRetries(function()
 		store:UpdateAsync(keyFor(userId), function(old)
+			written = false -- UpdateAsync может вызвать эту функцию несколько раз
 			if not releaseLock and profiles[player] ~= data then
 				return nil -- игрок уже вышел и замок отпущен — автосохранение не нужно
 			end
@@ -131,13 +135,14 @@ local function save(player, data, releaseLock)
 			else
 				data.SessionLock = { JobId = game.JobId, Time = os.time() }
 			end
+			written = true
 			return data
 		end)
 	end, 3)
 	if not ok then
 		warn("[DataService] Не удалось сохранить " .. userId .. ": " .. tostring(err))
 	end
-	return ok
+	return ok and written
 end
 
 local function loadPlayer(player)
@@ -212,6 +217,16 @@ function DataService.WaitForData(player, timeout)
 		task.wait(0.1)
 	end
 	return profiles[player]
+end
+
+-- Сохранить прямо сейчас, не дожидаясь автосохранения (покупки за Robux).
+-- true — данные точно записаны.
+function DataService.SaveNow(player)
+	local data = profiles[player]
+	if not data then
+		return false
+	end
+	return save(player, data, false)
 end
 
 -- Сколько секунд игрок был офлайн до этого входа

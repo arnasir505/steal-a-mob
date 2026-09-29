@@ -21,6 +21,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Formulas = require(ReplicatedStorage.Shared.Formulas)
 local Format = require(ReplicatedStorage.Shared.Format)
@@ -29,6 +30,7 @@ local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Mobs = require(ReplicatedStorage.Shared.Config.Mobs)
 local Rarities = require(ReplicatedStorage.Shared.Config.Rarities)
 local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
+local Products = require(ReplicatedStorage.Shared.Config.Products)
 
 local DataService = require(script.Parent.DataService)
 local EconomyService = require(script.Parent.EconomyService)
@@ -42,6 +44,10 @@ local PlotService = {}
 -- (player, item) — яйцо на участке вылупилось. На это смотрит индекс мобов.
 local hatchedEvent = Instance.new("BindableEvent")
 PlotService.MobHatched = hatchedEvent.Event
+
+-- (player, itemId) — хозяин нажал Hatch Now у яйца. Покупку обрабатывает ProductService.
+local instantHatchEvent = Instance.new("BindableEvent")
+PlotService.InstantHatchRequested = instantHatchEvent.Event
 
 local rng = Random.new()
 
@@ -184,6 +190,27 @@ local function renderItem(entry, id, placed)
 	sell.Triggered:Connect(function(player)
 		PlotService.Sell(player, id, entry)
 	end)
+
+	-- Мгновенное вылупление за Robux (или бесплатно, если остался купленный заряд).
+	-- Пока продукт не создан на сайте Roblox, кнопка есть только в Studio.
+	if placed.Type == "Egg" and (Products.DevProducts.InstantHatch.Id ~= 0 or RunService:IsStudio()) then
+		local hatch = Instance.new("ProximityPrompt")
+		hatch.Name = "HatchPrompt"
+		hatch.ActionText = "Hatch Now"
+		hatch.ObjectText = "Instant"
+		hatch.KeyboardKeyCode = Enum.KeyCode.R
+		hatch.GamepadKeyCode = Enum.KeyCode.ButtonB
+		hatch.RequiresLineOfSight = false
+		hatch.MaxActivationDistance = reach
+		hatch.UIOffset = Vector2.new(0, 120)
+		PlotBuilder.MakeOwnerOnly(hatch)
+		hatch.Parent = anchor
+		hatch.Triggered:Connect(function(player)
+			if byPlayer[player] == entry then
+				instantHatchEvent:Fire(player, id)
+			end
+		end)
+	end
 
 	entry.Models[id] = model
 	entry.Labels[id] = label
@@ -450,7 +477,7 @@ local function processHatching(player, data, notify)
 	return hatched
 end
 
--- Мгновенное вылупление (Developer Product на этапе 10 и тестовая команда)
+-- Мгновенное вылупление (покупка через ProductService и тестовая команда !hatch)
 function PlotService.HatchNow(player, id)
 	local data = DataService.Get(player)
 	if not data then

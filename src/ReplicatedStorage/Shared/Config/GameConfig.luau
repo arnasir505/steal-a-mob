@@ -42,7 +42,7 @@ GameConfig.Egg = {
 -- они в Config/Biomes (Boss.Speed и Boss.Knockback). Здесь общее для всех.
 GameConfig.Boss = {
 	TickInterval = 0.1,        -- как часто босс выбирает цель и поправляет курс (секунды)
-	WakeUpTime = 0.3,          -- сколько секунд босс просыпается, прежде чем побежать (0 — сразу)
+	WakeUpTime = 0.5,          -- сколько секунд босс просыпается, прежде чем побежать (0 — сразу)
 	CatchDistance = 4,         -- на каком расстоянии от края босса он ловит игрока (студы)
 	CatchHeight = 12,          -- насколько игрок может быть выше или ниже босса и всё равно попасться
 	ReturnSpeedShare = 0.6,    -- домой босс идёт шагом: такая доля от его скорости в погоне
@@ -303,6 +303,12 @@ GameConfig.DayNight = {
 		OutdoorAmbient = Color3.fromRGB(45, 50, 80),
 		Brightness = 2,
 	},
+}
+
+-- Покупки за Robux (ProductService)
+GameConfig.Purchases = {
+	WaitForDataSeconds = 30, -- сколько ждать загрузки данных игрока, прежде чем отложить выдачу
+	ReceiptKeepDays = 60,    -- сколько дней помнить номера покупок (защита от двойной выдачи)
 }
 
 return GameConfig

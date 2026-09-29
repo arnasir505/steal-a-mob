@@ -37,6 +37,10 @@
 --   !daily skip 4          — сдвинуть время на 4 дня (например, до начала сезона)
 --   !daily reset           — начать календарь сезона заново
 --   !top                   — обновить общую таблицу лидеров и показать её
+--   !buy                   — список донатов; !buy Money30Min / !buy X2Money — открыть окно покупки
+--                            (нужен настоящий Id в Config/Products; в Studio покупка бесплатная)
+--   !grant Money30Min      — выдать продукт без покупки, тем же путём, что и настоящая покупка
+--   !pass X2Money          — притвориться, что геймпасс куплен
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -82,6 +86,9 @@ local Mutations = require(ReplicatedStorage.Shared.Config.Mutations)
 local Biomes = require(ReplicatedStorage.Shared.Config.Biomes)
 local GameConfig = require(ReplicatedStorage.Shared.Config.GameConfig)
 local Items = require(ReplicatedStorage.Shared.Config.Items)
+local Products = require(ReplicatedStorage.Shared.Config.Products)
+local PassService = require(Services.PassService)
+local ProductService = require(Services.ProductService)
 
 local rng = Random.new()
 
@@ -540,6 +547,32 @@ local function onChatted(player, message)
 			end
 		end
 		printIndex(player)
+	elseif command == "buy" or command == "grant" or command == "pass" then
+		local word = words[2]
+		local passName = word and findKey(Products.GamePasses, word)
+		local productName = word and findKey(Products.DevProducts, word)
+		if command == "buy" and passName then
+			ProductService.PromptPass(player, passName)
+		elseif command == "buy" and productName then
+			ProductService.PromptProduct(player, productName)
+		elseif command == "grant" and productName then
+			print("Выдача " .. productName .. ":", ProductService.GrantForTesting(player, productName))
+		elseif command == "pass" and passName then
+			PassService.GrantForTesting(player, passName)
+			print("Тестовый геймпасс " .. passName .. " включён до выхода из игры."
+				.. " Настоящий, купленный за Robux, действует навсегда.")
+		else
+			print("--- Donations ---")
+			for name, pass in pairs(Products.GamePasses) do
+				print(string.format("  геймпасс %-14s Id %-12s куплен: %s", name, tostring(pass.Id),
+					tostring(PassService.Has(player, name))))
+			end
+			for name, product in pairs(Products.DevProducts) do
+				print(string.format("  продукт  %-14s Id %s", name, tostring(product.Id)))
+			end
+			local data = DataService.Get(player)
+			print("  зарядов мгновенного вылупления:", data and data.InstantHatches or 0)
+		end
 	elseif command == "sword" then
 		local word = words[2]
 		if word and string.lower(word) == "off" then

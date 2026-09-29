@@ -275,6 +275,12 @@ function Formulas.FriendsBonus(friendCount)
 	return math.min(cfg.Max, friendCount * cfg.PerFriend)
 end
 
+-- Пакет денег за Robux: доход игрока за minutes минут, но не меньше minMoney
+-- (иначе новичок с нулевым доходом заплатил бы и ничего не получил)
+function Formulas.MoneyPack(incomePerSecond, minutes, minMoney)
+	return math.max(minMoney or 0, math.floor(incomePerSecond * minutes * 60))
+end
+
 function Formulas.OfflineIncome(incomePerSecond, secondsAway, moneyMultiplier)
 	local seconds = clamp(secondsAway, 0, GameConfig.Offline.MaxSeconds)
 	return incomePerSecond * seconds * (moneyMultiplier or 1)
