@@ -17,6 +17,8 @@ local Items = require(ReplicatedStorage.Shared.Config.Items)
 local DataService = require(script.Parent.DataService)
 local EconomyService = require(script.Parent.EconomyService)
 
+local SfxService = require(script.Parent.SfxService)
+
 local TrailService = {}
 
 ---------------------------------------------------------------------
@@ -102,11 +104,13 @@ function TrailService.Buy(player, trailId)
 		return false
 	end
 	if not EconomyService.TrySpend(player, config.Price) then
+		SfxService.PlayFor(player, "PurchaseFail")
 		Remotes.Notify(player, "Not enough money", "You need $" .. Format.Number(config.Price))
 		return false
 	end
 	data.Trails[trailId] = true
 	player:SetAttribute("Trail_" .. trailId, true)
+	SfxService.PlayFor(player, "PurchaseSuccess")
 	Remotes.Notify(player, "Trail bought", config.DisplayName)
 	TrailService.Equip(player, trailId)
 	return true

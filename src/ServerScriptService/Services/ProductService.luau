@@ -43,6 +43,8 @@ local PlotService = require(script.Parent.PlotService)
 
 local C = GameConfig.Purchases
 
+local SfxService = require(script.Parent.SfxService)
+
 local ProductService = {}
 
 local pendingHatch = {} -- [player] = номер яйца, у которого нажали Hatch Now и открыли покупку
@@ -149,6 +151,7 @@ local function processPurchase(player, productName, purchaseId, robuxSpent)
 		data.ProcessedReceipts[key] = os.time()
 		data.Stats.RobuxSpent = (data.Stats.RobuxSpent or 0) + (robuxSpent or 0)
 		pruneReceipts(data)
+		SfxService.PlayFor(player, "PurchaseSuccess")
 		Remotes.Notify(player, "Thank you!", result)
 	end
 

@@ -15,6 +15,8 @@ local TweenService = game:GetService("TweenService")
 
 local UIAssets = require(ReplicatedStorage.Shared.Config.UIAssets)
 
+local Sfx = require(script.Parent.Sfx)
+
 local Kit = {}
 
 Kit.Font = Enum.Font.FredokaOne
@@ -288,6 +290,9 @@ function Kit.Button(props)
 	end
 
 	addPress(button)
+	button.Activated:Connect(function()
+		Sfx.Play("UiClick")
+	end)
 	if props.OnClick then
 		button.Activated:Connect(props.OnClick)
 	end
@@ -447,9 +452,10 @@ function Kit.Window(screen, props)
 	function window.Open()
 		for _, other in ipairs(windows) do
 			if other ~= window and other.IsOpen() then
-				other.Close()
+				other.Close(true)
 			end
 		end
+		Sfx.Play("UiOpen")
 		holder.Visible = true
 		openScale.Scale = 0.85
 		TweenService:Create(openScale, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
@@ -458,7 +464,11 @@ function Kit.Window(screen, props)
 		end
 	end
 
-	function window.Close()
+	-- silent = true — без звука (окно закрывается, потому что открылось другое)
+	function window.Close(silent)
+		if holder.Visible and not silent then
+			Sfx.Play("UiClose")
+		end
 		holder.Visible = false
 	end
 

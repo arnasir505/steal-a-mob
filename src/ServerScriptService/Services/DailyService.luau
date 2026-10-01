@@ -34,6 +34,8 @@ local TrailService = require(script.Parent.TrailService)
 
 local D = GameConfig.Daily
 
+local SfxService = require(script.Parent.SfxService)
+
 local DailyService = {}
 
 -- Только для тестов в Studio: сдвиг времени (команда !daily skip),
@@ -171,6 +173,7 @@ function DailyService.Claim(player, quiet)
 	data.Daily.Claimed = day
 	data.Daily.LastClaimDay = today
 	refresh(player, data)
+	SfxService.PlayFor(player, "DailyReward")
 	Remotes.Notify(player, "Daily reward — Day " .. day .. "/" .. Seasons.DaysInCalendar,
 		reward and DailyService.Describe(reward) or "")
 	return true

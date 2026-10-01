@@ -38,6 +38,8 @@ local K = GameConfig.Knockback
 
 local popupEvent = Remotes.Event("SpeedPopup")
 
+local SfxService = require(script.Parent.SfxService)
+
 local SpeedService = {}
 
 local treadmills = {}   -- [player] = поверхность дорожки его участка (PlotBuilder.GetTreadmillSurface)
@@ -246,9 +248,11 @@ function SpeedService.UpgradeTreadmill(player)
 	end
 	local cost = Formulas.TreadmillUpgradeCost(data.TreadmillLevel)
 	if not EconomyService.TrySpend(player, cost) then
+		SfxService.PlayFor(player, "PurchaseFail")
 		Remotes.Notify(player, "Not enough money", "You need $" .. Format.Number(cost))
 		return false
 	end
+	SfxService.PlayFor(player, "Upgrade")
 	data.TreadmillLevel = data.TreadmillLevel + 1
 	player:SetAttribute("TreadmillLevel", data.TreadmillLevel)
 	Remotes.Notify(player, "Treadmill upgraded", "Level " .. data.TreadmillLevel

@@ -41,6 +41,7 @@
 --                            (нужен настоящий Id в Config/Products; в Studio покупка бесплатная)
 --   !grant Money30Min      — выдать продукт без покупки, тем же путём, что и настоящая покупка
 --   !pass X2Money          — притвориться, что геймпасс куплен
+--   !sound UiClick         — проиграть звук (сначала только тебе, через секунду — в мире у тебя)
 --   !where                 — где я: биом или safe zone
 --   !tp Plains             — телепорт в центр биома (!tp home — на участок)
 --   !time 20               — поставить время суток (0-24, без числа — показать)
@@ -89,6 +90,8 @@ local Items = require(ReplicatedStorage.Shared.Config.Items)
 local Products = require(ReplicatedStorage.Shared.Config.Products)
 local PassService = require(Services.PassService)
 local ProductService = require(Services.ProductService)
+local SfxService = require(Services.SfxService)
+local Sounds = require(ReplicatedStorage.Shared.Config.Sounds)
 
 local rng = Random.new()
 
@@ -547,6 +550,25 @@ local function onChatted(player, message)
 			end
 		end
 		printIndex(player)
+	elseif command == "sound" then
+		local name = words[2] and findKey(Sounds.List, words[2])
+		if not name then
+			print("Звуки:", table.concat((function()
+				local list = {}
+				for key, config in pairs(Sounds.List) do
+					table.insert(list, key .. (config.Id == 0 and "(нет Id)" or ""))
+				end
+				table.sort(list)
+				return list
+			end)(), ", "))
+		else
+			print("Играю " .. name .. " (Id " .. Sounds.List[name].Id .. ")")
+			SfxService.PlayFor(player, name)
+			task.delay(1, function()
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				SfxService.PlayAt(root, name)
+			end)
+		end
 	elseif command == "buy" or command == "grant" or command == "pass" then
 		local word = words[2]
 		local passName = word and findKey(Products.GamePasses, word)

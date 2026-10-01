@@ -78,6 +78,8 @@ local DISABLED_STATES = {
 	Enum.HumanoidStateType.PlatformStanding,
 }
 
+local SfxService = require(script.Parent.SfxService)
+
 local BossService = {}
 
 local bossFolder -- Workspace.Bosses
@@ -520,8 +522,23 @@ local function releaseEgg(boss)
 	end
 end
 
+-- Храп спящего босса: звук в его корневой детали (после пересоздания — новый)
+local function snore(boss, on)
+	if not (boss.Snore and boss.Snore.Parent == boss.Root) then
+		boss.Snore = SfxService.Loop(boss.Root, "BossSnore")
+	end
+	if boss.Snore then
+		if on then
+			boss.Snore:Play()
+		else
+			boss.Snore:Stop()
+		end
+	end
+end
+
 local function sleep(boss)
 	releaseEgg(boss)
+	snore(boss, true)
 	boss.State = "Sleep"
 	setTarget(boss, nil)
 	boss.Humanoid:MoveTo(boss.Root.Position)
@@ -545,6 +562,8 @@ end
 
 local function wake(boss, now)
 	unfreeze(boss)
+	snore(boss, false)
+	SfxService.PlayAt(boss.Root, "BossWake")
 	boss.State = "Wake"
 	boss.WakeUntil = now + C.WakeUpTime
 	setStatus(boss, "!", ALERT_COLOR)
@@ -689,6 +708,7 @@ local function catch(boss, player, root, now)
 	end
 
 	-- Сначала роняем, потом толкаем: так игрок улетает уже обмякшим
+	SfxService.PlayAt(root, "Caught")
 	RagdollService.Ragdoll(player, C.RagdollTime)
 	SpeedService.Knockback(player, boss.Root.Position, boss.Config.Knockback or 60)
 	if takenEgg then

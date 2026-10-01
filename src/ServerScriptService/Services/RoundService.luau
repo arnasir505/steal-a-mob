@@ -28,6 +28,8 @@ local WorldService = require(script.Parent.WorldService)
 
 local R = GameConfig.Round
 
+local SfxService = require(script.Parent.SfxService)
+
 local RoundService = {}
 
 local roundEndsAt = 0
@@ -78,6 +80,7 @@ local function resetRound()
 	-- 3. Новые яйца и открываем биомы
 	EggService.SpawnRound()
 	WorldService.SetGatesClosed(false)
+	SfxService.PlayForAll("RoundStart")
 
 	resetting = false
 	ReplicatedStorage:SetAttribute("RoundResetting", false)
@@ -107,6 +110,7 @@ function RoundService.Init()
 
 			if not warned and left <= R.WarningBefore and left > 0 then
 				warned = true
+				SfxService.PlayForAll("RoundWarning")
 				Remotes.NotifyAll("Round ending", "Get to the safe zone! " .. Format.Time(left))
 			end
 

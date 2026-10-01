@@ -33,6 +33,8 @@ local PlotBuilder = require(script.Parent.PlotBuilder)
 
 local F = GameConfig.Fuse
 
+local SfxService = require(script.Parent.SfxService)
+
 local FuseService = {}
 
 local rng = Random.new()
@@ -134,6 +136,7 @@ function FuseService.Fuse(player, ids)
 	end
 	InventoryService.AddMobItem(player, item)
 
+	SfxService.PlayFor(player, "Fuse")
 	if upgraded then
 		Remotes.Notify(player, "Lucky fuse!", InventoryService.Describe(item) .. " — heavier!")
 	else

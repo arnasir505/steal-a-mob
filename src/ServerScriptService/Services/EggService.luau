@@ -34,6 +34,8 @@ local InventoryService = require(script.Parent.InventoryService)
 local WorldService = require(script.Parent.WorldService)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 
+local SfxService = require(script.Parent.SfxService)
+
 local EggService = {}
 
 local rng = Random.new()
@@ -175,6 +177,7 @@ local function spawnEgg(biome, taken)
 
 	-- Редкое яйцо — новость для всего сервера
 	if Rarities.Get(item.Rarity).Announce then
+		SfxService.PlayForAll("RareEggSpawn")
 		Remotes.NotifyAll(Rarities.Get(item.Rarity).DisplayName .. " egg!",
 			describeEgg(item) .. " spawned in " .. (biome.Config.DisplayName or biome.Id))
 	end
@@ -277,6 +280,7 @@ function EggService.Take(player, eggId)
 	player:SetAttribute("CarryWeight", egg.Item.Weight)
 	player:SetAttribute("CarryRarity", egg.Item.Rarity)
 
+	SfxService.PlayFor(player, "EggPickup")
 	Remotes.Notify(player, "Egg taken", describeEgg(egg.Item) .. " — run to the safe zone!")
 	takenEvent:Fire(player, egg.BiomeId, egg.Item, egg.Id)
 	return true
@@ -315,6 +319,7 @@ local function putDown(player, egg, ground)
 	if egg.Prompt then
 		egg.Prompt.Enabled = true
 	end
+	SfxService.PlayAt(model.PrimaryPart, "EggDrop")
 	droppedEvent:Fire(player, egg.BiomeId, egg.Item, egg.Id)
 	return true
 end
@@ -434,6 +439,7 @@ local function deliver(player, egg)
 
 	InventoryService.AddEggItem(player, item)
 	data.Stats.EggsStolen = data.Stats.EggsStolen + 1
+	SfxService.PlayFor(player, "EggSecured")
 	Remotes.Notify(player, "Egg secured!", describeEgg(item))
 	deliveredEvent:Fire(player, item)
 end

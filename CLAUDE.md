@@ -211,6 +211,13 @@ Uncommon, Rare; босс Farmer.
 `UI_Assets`). Значок Robux — символ `utf8.char(0xE002)`. Сервер даёт интерфейсу
 атрибуты игрока: `ChasedBy` (кто гонится), `Trail_<Id>` (купленные трейлы) и др.
 
+**Звуки.** Id и громкость — `Config/Sounds.luau` (Id = 0 — звук молчит). Сервер:
+`SfxService.PlayAt` (в мире, слышат все рядом), `PlayFor` (одному), `PlayForAll`,
+`Loop` (храп босса). Клиент: `UI/Sfx` (2D-звуки), `GameSounds.client.luau` — музыка по
+атрибуту `Zone` (WorldService: "Safe", Id биома или ""), погоня по `ChasedBy`,
+дорожка по `OnTreadmill`; клик и окна — в `Kit`. Музыка биома — `Music<Id биома>`.
+Не брать звуки из Minecraft и других чужих игр (тот же риск жалобы, что и с мобами).
+
 **Обучение.** Стрелками.
 
 **Донаты.**

@@ -432,6 +432,31 @@ function WorldService.Init()
 	end
 
 	WorldService.SetGatesClosed(false)
+
+	-- Где игрок: атрибут Zone = "Safe", Id биома или "" (между зонами).
+	-- По нему клиент выбирает музыку.
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			for _, player in ipairs(Players:GetPlayers()) do
+				local character = player.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				if root then
+					local zone = ""
+					if WorldService.IsInSafeZone(root.Position) then
+						zone = "Safe"
+					else
+						local biome = WorldService.GetBiomeAt(root.Position)
+						zone = biome and biome.Id or ""
+					end
+					if player:GetAttribute("Zone") ~= zone then
+						player:SetAttribute("Zone", zone)
+					end
+				end
+			end
+		end
+	end)
+
 	print("[WorldService] Биомов найдено: " .. #biomeOrder
 		.. ", safe zone: " .. (#safeZoneBoxes > 0 and "есть" or "НЕТ"))
 end

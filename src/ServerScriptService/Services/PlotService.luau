@@ -39,6 +39,8 @@ local PassService = require(script.Parent.PassService)
 local SpeedService = require(script.Parent.SpeedService)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 
+local SfxService = require(script.Parent.SfxService)
+
 local PlotService = {}
 
 -- (player, item) — яйцо на участке вылупилось. На это смотрит индекс мобов.
@@ -336,6 +338,7 @@ function PlotService.PlaceFromBackpack(player)
 		local seconds = item.HatchLeft or Formulas.HatchTime(item, hatchMultiplier(player))
 		item.HatchLeft = nil
 		placed.HatchEndsAt = os.time() + math.max(1, math.floor(seconds))
+		SfxService.PlayFor(player, "EggPlace")
 		Remotes.Notify(player, "Egg placed", itemName(item) .. " Egg — " .. Format.Time(seconds))
 	end
 
@@ -408,6 +411,7 @@ function PlotService.Sell(player, id, atEntry)
 	data.Plot.Items[id] = nil
 	clearItemVisual(entry, id)
 	EconomyService.AddMoney(player, price)
+	SfxService.PlayFor(player, "PurchaseSuccess")
 	Remotes.Notify(player, "Sold", InventoryService.Describe(placed.Item) .. " for $" .. Format.Number(price))
 	updateSign(entry, data)
 	recalcIncome(player)
@@ -429,6 +433,7 @@ function PlotService.Upgrade(player)
 	end
 	local cost = Formulas.BaseUpgradeCost(data.BaseLevel)
 	if not EconomyService.TrySpend(player, cost) then
+		SfxService.PlayFor(player, "PurchaseFail")
 		Remotes.Notify(player, "Not enough money", "You need $" .. Format.Number(cost))
 		return
 	end
@@ -436,6 +441,7 @@ function PlotService.Upgrade(player)
 	player:SetAttribute("Slots", capacity(data))
 	PlotBuilder.UpdateFence(entry.Model, data.BaseLevel)
 	updateSign(entry, data)
+	SfxService.PlayFor(player, "Upgrade")
 	Remotes.Notify(player, "Base upgraded", "Now " .. capacity(data) .. " slots.")
 end
 
@@ -462,10 +468,12 @@ local function processHatching(player, data, notify)
 			hatched = true
 			hatchedEvent:Fire(player, item) -- индекс мобов (IndexService)
 			if notify then
+				SfxService.PlayFor(player, "EggHatch")
 				Remotes.Notify(player, "Egg hatched!", InventoryService.Describe(item))
 				-- Редкая мутация — событие для всего сервера
 				local mutation = Mutations.Get(item.Mutation)
 				if mutation.Announce then
+					SfxService.PlayForAll("RareHatch")
 					Remotes.NotifyAll(
 						mutation.DisplayName .. " hatch!",
 						player.DisplayName .. " got a " .. InventoryService.Describe(item)

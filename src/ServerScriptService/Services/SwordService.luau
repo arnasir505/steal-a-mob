@@ -46,6 +46,8 @@ local RagdollService = require(script.Parent.RagdollService)
 
 local C = GameConfig.Combat
 
+local SfxService = require(script.Parent.SfxService)
+
 local SwordService = {}
 
 local SWORD_ATTRIBUTE = "SwordId" -- так игра отличает свои мечи от других Tool
@@ -82,11 +84,14 @@ local function hint(player, title, text)
 	Remotes.Notify(player, title, text)
 end
 
+-- Свой звук внутри меча (Swing / Hit), а если его нет — общий из Config/Sounds
 local function playSound(tool, name)
 	local sound = tool:FindFirstChild(name, true)
 	if sound and sound:IsA("Sound") then
 		sound:Play()
+		return
 	end
+	SfxService.PlayAt(tool:FindFirstChild("Handle"), "Sword" .. name)
 end
 
 ---------------------------------------------------------------------
