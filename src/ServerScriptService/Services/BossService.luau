@@ -497,6 +497,22 @@ end
 ---------------------------------------------------------------------
 
 -- Ставит яйцо, которое босс несёт, на место (дошёл, застрял или его отвлекли)
+-- Цель босса. Игроку кладём атрибут ChasedBy (имя босса), чтобы интерфейс
+-- показал "RUN!!". Сбрасываем, только если это наш босс его и гнал.
+local function setTarget(boss, player)
+	local old = boss.Target
+	if old == player then
+		return
+	end
+	if old and old:GetAttribute("ChasedBy") == boss.Name then
+		old:SetAttribute("ChasedBy", nil)
+	end
+	boss.Target = player
+	if player then
+		player:SetAttribute("ChasedBy", boss.Name)
+	end
+end
+
 local function releaseEgg(boss)
 	if boss.CarriedEgg then
 		EggService.PutBack(boss.CarriedEgg)
@@ -507,7 +523,7 @@ end
 local function sleep(boss)
 	releaseEgg(boss)
 	boss.State = "Sleep"
-	boss.Target = nil
+	setTarget(boss, nil)
 	boss.Humanoid:MoveTo(boss.Root.Position)
 	boss.Root.Anchored = true
 	boss.Model:PivotTo(boss.BedPivot)
@@ -553,7 +569,7 @@ end
 
 local function goHome(boss, now)
 	boss.State = "Return"
-	boss.Target = nil
+	setTarget(boss, nil)
 	boss.ReturnStartedAt = now
 	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
 	boss.Humanoid:MoveTo(boss.BedPosition)
@@ -564,7 +580,7 @@ end
 -- Несёт отобранное яйцо над головой к месту, где оно появилось
 local function startCarry(boss, egg, now)
 	boss.State = "Carry"
-	boss.Target = nil
+	setTarget(boss, nil)
 	boss.CarriedEgg = egg
 	boss.CarryStartedAt = now
 	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
@@ -736,7 +752,7 @@ local function update(boss, now)
 	end
 
 	if target ~= boss.Target then
-		boss.Target = target
+		setTarget(boss, target)
 		Remotes.Notify(target, boss.Name .. " is after you!", "Run to the safe zone!")
 	end
 

@@ -73,6 +73,9 @@ local function applyTrail(player)
 	trail.Color = ColorSequence.new(config.Color or Color3.fromRGB(255, 255, 255))
 	trail.Lifetime = 0.6
 	trail.LightEmission = 0.5
+	-- Лента всегда повёрнута к камере: иначе, если бежать и смотреть прямо,
+	-- вертикальную ленту видно только ребром
+	trail.FaceCamera = true
 	trail.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.2),
 		NumberSequenceKeypoint.new(1, 1),
@@ -103,6 +106,7 @@ function TrailService.Buy(player, trailId)
 		return false
 	end
 	data.Trails[trailId] = true
+	player:SetAttribute("Trail_" .. trailId, true)
 	Remotes.Notify(player, "Trail bought", config.DisplayName)
 	TrailService.Equip(player, trailId)
 	return true
@@ -115,6 +119,7 @@ function TrailService.Grant(player, trailId)
 		return false
 	end
 	data.Trails[trailId] = true
+	player:SetAttribute("Trail_" .. trailId, true)
 	return true
 end
 
@@ -155,6 +160,10 @@ function TrailService.Init()
 
 	DataService.ProfileLoaded:Connect(function(player, data)
 		player:SetAttribute("EquippedTrail", data.EquippedTrail)
+		-- Купленные трейлы — атрибутами Trail_<Id>, для магазина трейлов
+		for trailId in pairs(data.Trails) do
+			player:SetAttribute("Trail_" .. trailId, true)
+		end
 		applyTrail(player)
 		player.CharacterAdded:Connect(function()
 			task.defer(applyTrail, player)

@@ -236,7 +236,9 @@ function ProductService.Init()
 
 	-- Для интерфейса на этапе 11
 	Remotes.Event("BuyProduct").OnServerEvent:Connect(function(player, productName)
-		if type(productName) == "string" and productName ~= "InstantHatch" then
+		-- InstantHatch из магазина — заряд "впрок": тратится на яйцо, которому дольше всех ждать,
+		-- а если яиц нет — копится до кнопки Hatch Now
+		if type(productName) == "string" then
 			ProductService.PromptProduct(player, productName)
 		end
 	end)

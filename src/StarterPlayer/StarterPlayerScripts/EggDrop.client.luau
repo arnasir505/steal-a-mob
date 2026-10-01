@@ -1,6 +1,7 @@
 -- EggDrop: кнопка "бросить яйцо".
 --
--- G на клавиатуре, Y на геймпаде, на телефоне — кнопка на экране.
+-- G на клавиатуре, Y на геймпаде. Кнопку Drop на экране (для всех, и для телефона)
+-- рисует интерфейс — UI/ChaseOverlay.
 -- Кнопка есть, только пока игрок несёт яйцо. Клиент лишь просит —
 -- сервер сам проверит, что яйцо в руках и что игрок не в safe zone.
 
@@ -29,9 +30,8 @@ local function refresh()
 	local carrying = (player:GetAttribute("CarryRarity") or "") ~= ""
 	if carrying and not bound then
 		bound = true
-		-- true = на телефоне появится кнопка на экране (сбоку, у кнопки прыжка)
-		ContextActionService:BindAction(ACTION, onAction, true, Enum.KeyCode.G, Enum.KeyCode.ButtonY)
-		ContextActionService:SetTitle(ACTION, "Drop")
+		-- false: свою кнопку на экране рисует интерфейс
+		ContextActionService:BindAction(ACTION, onAction, false, Enum.KeyCode.G, Enum.KeyCode.ButtonY)
 	elseif not carrying and bound then
 		bound = false
 		ContextActionService:UnbindAction(ACTION)
