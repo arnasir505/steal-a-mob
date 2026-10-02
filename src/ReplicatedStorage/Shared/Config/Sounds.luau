@@ -53,6 +53,12 @@ Sounds.List = {
 	-- Музыка (повторяется)
 	MusicLobby      = { Id = 119504467986585, Volume = 0.1 }, -- в safe zone и на участке
 	MusicPlains     = { Id = 0, Volume = 0.3 }, -- в биоме Plains
+	MusicForest     = { Id = 0, Volume = 0.3 },
+	MusicDesert     = { Id = 0, Volume = 0.3 },
+	MusicSnow       = { Id = 0, Volume = 0.3 },
+	MusicSwamp      = { Id = 0, Volume = 0.3 },
+	MusicUnderworld = { Id = 0, Volume = 0.3 },
+	MusicCrystalCave = { Id = 0, Volume = 0.3 },
 }
 
 return Sounds

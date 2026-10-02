@@ -16,7 +16,7 @@
 -- Что нужно в Workspace:
 --   Plots                — участки (как для игры).
 --   Biomes.<Имя>         — модель биома с деталью Area (объём биома). Имена стилей:
---                          Plains, Forest, Desert, Snow, Swamp, Nether, CrystalCave.
+--                          Plains, Forest, Desert, Snow, Swamp, Underworld, CrystalCave.
 --                          Биома ещё нет в Config/Biomes — не страшно, декор всё равно встанет.
 --
 -- Как запустить: Studio -> View -> Command Bar -> вставить весь файл -> Enter.
@@ -180,7 +180,7 @@ local THEMES = {
 		Plants = { DarkTuft = 0.06, Reed = 0.015, SmallMushroom = 0.01 },
 		EdgeProps = { Tree = 3, FallenLog = 2, Stump = 1 }, EdgeChance = 0.07,
 	},
-	Nether = {
+	Underworld = {
 		Top = "Hellrock", Fill = "Hellrock", Deep = "Basalt", FillDepth = 4, Ground = "Hellrock",
 		MinHeight = 4, MaxHeight = 14,
 		Trees = { Fungus = 1 }, TreeChance = 0.05,
@@ -232,11 +232,40 @@ local function tryRequire(names)
 	if not node then
 		return nil
 	end
-	local ok, result = pcall(require, node)
+	-- Command Bar запоминает модуль после первого require и потом отдаёт старую копию,
+	-- даже если файл поменялся. Копия модуля — всегда свежие числа.
+	local fresh = node:Clone()
+	local ok, result = pcall(require, fresh)
+	fresh:Destroy()
 	return ok and result or nil
 end
 
-local TEXTURES = tryRequire({ "Shared", "Config", "BlockTextures" }) or {}
+-- Id текстуры в виде текста из одних цифр. Длинное число нельзя просто
+-- превратить в текст: может получиться "1.13e+14", поэтому %d.
+local function textureId(value)
+	if type(value) == "number" then
+		return value > 0 and string.format("%d", value) or nil
+	end
+	local digits = value and string.match(tostring(value), "%d+")
+	return digits ~= "0" and digits or nil
+end
+
+local TEXTURES = {}
+do
+	local raw = tryRequire({ "Shared", "Config", "BlockTextures" })
+	if not raw then
+		warn("[BlockWorld] Не найден Config/BlockTextures — блоки будут без текстур. Rojo подключён?")
+	else
+		local count = 0
+		for name, value in pairs(raw) do
+			TEXTURES[name] = textureId(value)
+			if TEXTURES[name] then
+				count += 1
+			end
+		end
+		print("[BlockWorld] Текстур с Id: " .. count)
+	end
+end
 
 -- Деталь из модели или сама деталь
 local function resolvePart(holder)
@@ -507,7 +536,7 @@ local function block(parent, name, kind, size, cframe, faces)
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	local id = info.Texture and TEXTURES[info.Texture]
-	if id and id ~= 0 then
+	if id then
 		-- Одна плитка текстуры = один блок, поэтому склеенные блоки всё равно видны по отдельности
 		for _, face in ipairs(faces or ALL_SIDES) do
 			local t = Instance.new("Texture")
@@ -1416,9 +1445,9 @@ print(string.format("[BlockWorld] Деревьев %d, фонарей %d, под
 	treeCount, lanternCount, lightsUsed, MAX_LIGHTS, partCount))
 if #missingThemes > 0 then
 	warn("[BlockWorld] Нет стиля для биомов: " .. table.concat(missingThemes, ", ")
-		.. " — взят стиль Plains. Имена стилей: Plains, Forest, Desert, Snow, Swamp, Nether, CrystalCave.")
+		.. " — взят стиль Plains. Имена стилей: Plains, Forest, Desert, Snow, Swamp, Underworld, CrystalCave.")
 end
-local expected = { "Plains", "Forest", "Desert", "Snow", "Swamp", "Nether", "CrystalCave" }
+local expected = { "Plains", "Forest", "Desert", "Snow", "Swamp", "Underworld", "CrystalCave" }
 local missingModels = {}
 for _, name in ipairs(expected) do
 	local found = false

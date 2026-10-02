@@ -45,6 +45,12 @@ Minecraft и не упоминать Minecraft в названии/описан�
 чем дальше биом, тем лучше окно редкостей.
 Первый биом — Plains: мобы Chicken, Pig, Sheep, Cow, Horse; редкости Common,
 Uncommon, Rare; босс Farmer.
+Порядок биомов от спавна: Plains → Forest → Desert → Snow → Swamp → Underworld → CrystalCave
+(`Config/Biomes.luau`, по 5 мобов в `Config/Mobs.luau`). Окно редкостей сдвигается на одну
+за биом (Forest: Uncommon–Epic, ... Underworld: Mythic–Ultra), у CrystalCave окно из четырёх:
+Galactic–Immortal. С каждым биомом растут MaxWeight яиц, BaseIncome мобов (~x4),
+скорость босса (~x6) и толчок (+20). За полный индекс биома — свой меч (у Plains нет).
+Биом без модели в Workspace не работает (предупреждение в Output), остальные работают.
 
 **Раунды.** Каждые 5 минут: предупреждение за 10 секунд → все яйца вне рюкзаков
 (в руках и на земле) удаляются → всех, кто не в safe zone, телепортирует на свой участок
@@ -64,7 +70,7 @@ Uncommon, Rare; босс Farmer.
 (чужая, нет доступа) — берётся стандартная анимация Roblox (`GameConfig.Boss.DefaultAnimations`).
 Блочный декор карты — `tools/BlockWorld.lua` (запуск из Command Bar, строит модель `WorldDecor`):
 холмы вокруг спавна (с запасом под максимальный рост участков) и по бокам каждого биома в его
-стиле (`THEMES`: Plains, Forest, Desert, Snow, Swamp, Nether, CrystalCave — порядок биомов такой же),
+стиле (`THEMES`: Plains, Forest, Desert, Snow, Swamp, Underworld, CrystalCave — порядок биомов такой же),
 деревья, растения, пятна на полу. Внутри биомов твёрдые предметы только у краёв (`EDGE_BAND`),
 возле точек яиц, ворот и босса пусто. Арок с названиями биомов не делать (решение автора).
 Id текстур — `Config/BlockTextures.luau`; картинки рисует `tools/make_block_textures.ps1` → `BlockTextures/`.
@@ -264,7 +270,7 @@ Id текстур — `Config/BlockTextures.luau`; картинки рисует
    Готово: экран (Shop/Index, скорость и деньги, таймеры), магазин (донаты, трейлы),
    индекс, погоня (RUN!!, Drop). Дальше: рюкзак, синтез, календарь, окно офлайн-дохода,
    скрытие мобов, свои уведомления, обучение стрелками.
-12. ⬜ Остальные биомы.
+12. 🔶 Остальные биомы. Конфиги готовы (биомы, мобы, боссы, мечи, музыка) — ждём модели.
 13. ⬜ Баланс, тесты, запуск.
 
 ## Ждём от автора
@@ -278,3 +284,7 @@ Id текстур — `Config/BlockTextures.luau`; картинки рисует
 - Машина синтеза: деталь или модель `FuseMachine` в Workspace (пока её нет — только `!fuse`).
 - Табло лидеров: деталь `IncomeLeaderboard` в Workspace (пока её нет — только `!top`).
 - Все 30 наград календаря в `Config/Seasons.luau` (пустые дни пока заполнены деньгами).
+- Биомы Forest, Desert, Snow, Swamp, Underworld, CrystalCave в `Workspace.Biomes`, их боссы
+  (Lumberjack, Pharaoh, Yeti, BogHermit, InfernoKing, GemWarden), мобы и яйца
+  (`ForestEgg`, `DesertEgg`, `SnowEgg`, `SwampEgg`, `UnderworldEgg`, `CrystalEgg`),
+  мечи-награды, Id музыки `Music<Id биома>` и картинок `biome_<id>` для индекса.

@@ -19,7 +19,9 @@
 -- SwordReward    — необязательно: меч за открытие всех мобов биома в индексе.
 --                  У Plains награды нет: деревянный меч — начальный
 --                  (GameConfig.Combat.StarterSword)
--- ModelName      — имя папки биома в Workspace (сделаешь сам)
+-- ModelName      — имя модели биома в Workspace.Biomes (сделаешь сам).
+--                  Пока модели нет, биом просто не работает: игра пишет
+--                  предупреждение в Output, остальные биомы работают.
 --
 -- Какие мобы живут в биоме, задаётся в Config/Mobs полем Biome.
 
@@ -41,8 +43,103 @@ Biomes.List = {
 			TurnDegrees = 0,
 		},
 	},
-	-- Следующие биомы добавляются сюда же, по порядку. Например:
-	-- { Id = "Forest", Rarities = { "Uncommon", "Rare", "Epic" }, MaxWeight = 1000000, ... },
+	{
+		Id = "Forest",
+		DisplayName = "Forest",
+		ModelName = "Forest",
+		EggsAtOnce = 5,
+		Rarities = { "Uncommon", "Rare", "Epic" },
+		MaxWeight = 5000,
+		SwordReward = "VineBlade",
+		Boss = {
+			DisplayName = "Lumberjack",
+			ModelName = "Lumberjack",
+			Speed = 30,
+			Knockback = 80,
+			TurnDegrees = 0,
+		},
+	},
+	{
+		Id = "Desert",
+		DisplayName = "Desert",
+		ModelName = "Desert",
+		EggsAtOnce = 5,
+		Rarities = { "Rare", "Epic", "Legendary" },
+		MaxWeight = 50000,
+		SwordReward = "SandSaber",
+		Boss = {
+			DisplayName = "Pharaoh",
+			ModelName = "Pharaoh",
+			Speed = 200,
+			Knockback = 100,
+			TurnDegrees = 0,
+		},
+	},
+	{
+		Id = "Snow",
+		DisplayName = "Snow",
+		ModelName = "Snow",
+		EggsAtOnce = 5,
+		Rarities = { "Epic", "Legendary", "Mythic" },
+		MaxWeight = 500000,
+		SwordReward = "FrostBlade",
+		Boss = {
+			DisplayName = "Yeti",
+			ModelName = "Yeti",
+			Speed = 1200,
+			Knockback = 120,
+			TurnDegrees = 0,
+		},
+	},
+	{
+		Id = "Swamp",
+		DisplayName = "Swamp",
+		ModelName = "Swamp",
+		EggsAtOnce = 5,
+		Rarities = { "Legendary", "Mythic", "Galactic" },
+		MaxWeight = 5000000,
+		SwordReward = "BogCleaver",
+		Boss = {
+			DisplayName = "Bog Hermit",
+			ModelName = "BogHermit",
+			Speed = 7500,
+			Knockback = 140,
+			TurnDegrees = 0,
+		},
+	},
+	{
+		Id = "Underworld",
+		DisplayName = "Underworld",
+		ModelName = "Underworld",
+		EggsAtOnce = 5,
+		Rarities = { "Mythic", "Galactic", "Ultra" },
+		MaxWeight = 25000000,
+		SwordReward = "MagmaSword",
+		Boss = {
+			DisplayName = "Inferno King",
+			ModelName = "InfernoKing",
+			Speed = 45000,
+			Knockback = 160,
+			TurnDegrees = 0,
+		},
+	},
+	{
+		Id = "CrystalCave",
+		DisplayName = "Crystal Cave",
+		ModelName = "CrystalCave",
+		EggsAtOnce = 5,
+		-- Последний биом: окно шире, только здесь выпадает Immortal
+		Rarities = { "Galactic", "Ultra", "Abyssal", "Immortal" },
+		MaxWeight = 100000000,
+		SwordReward = "PrismSword",
+		Boss = {
+			DisplayName = "Gem Warden",
+			ModelName = "GemWarden",
+			Speed = 250000,
+			Knockback = 180,
+			TurnDegrees = 0,
+		},
+	},
 }
 
 -- Быстрый поиск биома по Id

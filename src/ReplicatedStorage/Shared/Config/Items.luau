@@ -14,7 +14,22 @@ local Items = {}
 Items.Swords = {
 	WoodenSword = { DisplayName = "Wooden Sword", Rarity = "Common", Knockback = 40, ModelName = "WoodenSword",
 		Color = Color3.fromRGB(170, 125, 75) },
-		DiamondSword = { DisplayName = "Diamond Sword", Rarity = "Legendary", Knockback = 114, ModelName = "DiamondSword",
+
+	-- Награды за полный индекс биома (Biomes.SwordReward), по порядку биомов
+	VineBlade  = { DisplayName = "Vine Blade",  Rarity = "Uncommon",  Knockback = 50,  ModelName = "VineBlade",
+		Color = Color3.fromRGB(80, 170, 60) },   -- Forest
+	SandSaber  = { DisplayName = "Sand Saber",  Rarity = "Rare",      Knockback = 62,  ModelName = "SandSaber",
+		Color = Color3.fromRGB(225, 200, 130) }, -- Desert
+	FrostBlade = { DisplayName = "Frost Blade", Rarity = "Epic",      Knockback = 76,  ModelName = "FrostBlade",
+		Color = Color3.fromRGB(150, 210, 255) }, -- Snow
+	BogCleaver = { DisplayName = "Bog Cleaver", Rarity = "Legendary", Knockback = 92,  ModelName = "BogCleaver",
+		Color = Color3.fromRGB(90, 110, 60) },   -- Swamp
+	MagmaSword = { DisplayName = "Magma Sword", Rarity = "Mythic",    Knockback = 110, ModelName = "MagmaSword",
+		Color = Color3.fromRGB(255, 100, 30) },  -- Underworld
+	PrismSword = { DisplayName = "Prism Sword", Rarity = "Galactic",  Knockback = 130, ModelName = "PrismSword",
+		Color = Color3.fromRGB(200, 120, 255) }, -- CrystalCave
+
+	DiamondSword = { DisplayName = "Diamond Sword", Rarity = "Legendary", Knockback = 114, ModelName = "DiamondSword",
 		Color = Color3.fromRGB(170, 125, 75) },
 }
 

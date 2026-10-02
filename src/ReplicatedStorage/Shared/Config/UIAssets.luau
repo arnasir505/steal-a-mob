@@ -51,6 +51,12 @@ UIAssets.Images = {
 	-- Трейлы (одна белая фигурка, цвет задаётся в игре), биомы, фон окон
 	trail_runner = id(82338875349140),
 	biome_plains = id(105162285500535),
+	biome_forest = id(0),
+	biome_desert = id(0),
+	biome_snow = id(0),
+	biome_swamp = id(0),
+	biome_underworld = id(0),
+	biome_crystalcave = id(0),
 	pattern_studs = id(73235366447601),
 
 	-- Белое свечение за товарами, трейлами и мобами (красится под цвет карточки)

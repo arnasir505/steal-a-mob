@@ -3,24 +3,25 @@
 --
 -- Как получить Id: в Studio View -> Asset Manager -> Bulk Import, выбери картинки,
 -- потом правой кнопкой по картинке -> Copy ID to Clipboard и вставь число сюда.
+-- Можно вставить и просто число (123456), и строку целиком ("rbxassetid://123456").
 -- 0 — без текстуры, блок будет просто цветным.
 -- После изменения запусти tools/BlockWorld.lua ещё раз, чтобы текстуры встали.
 
 return {
-	GrassTop = 0,
-	Dirt = 0,
-	Stone = 0,
-	Log = 0,
-	Leaves = 0,
-	BirchLog = 0,
-	StoneBrick = 0,
-	Path = 0,
-	Sand = 0,
-	Sandstone = 0,
-	Snow = 0,
-	Ice = 0,
-	Hellrock = 0,
-	Obsidian = 0,
-	Hay = 0,
-	Cactus = 0,
+	GrassTop = 113140774526369,
+	Dirt = 96208346558270,
+	Stone = 77106142835280,
+	Log = 133325220196990,
+	Leaves = 126917387413616,
+	BirchLog = 87594390387403,
+	StoneBrick = 77405069965306,
+	Path = 73953404753901,
+	Sand = 99566943528381,
+	Sandstone = 105740743018427,
+	Snow = 107626673260769,
+	Ice = 75457418696047,
+	Hellrock = 137979253539619,
+	Obsidian = 92885373543801,
+	Hay = 93172542972261,
+	Cactus = 97385350749611,
 }
