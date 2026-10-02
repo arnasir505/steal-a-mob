@@ -9,8 +9,10 @@
 --            чтобы на большой скорости игрок ни во что не врезался посреди погони.
 --            За последним биомом холмы закрывают конец карты.
 --   Облака и невидимая стена по внешнему краю холмов (толщина 8).
+--   Новые биомы — каких биомов из BIOME_ORDER нет, те создаются сами за последним
+--            существующим, того же размера (Area, Floor, Gate, BossSpawn, EggSpawns).
 --
--- Участки, SafeZone, биомы, ворота, точки яиц и боссов скрипт НЕ двигает и не меняет.
+-- Существующие участки, SafeZone, биомы, ворота, точки яиц и боссов скрипт НЕ двигает.
 -- Возле точек яиц, ворот и босса предметы не ставятся (KEEP_CLEAR).
 --
 -- Что нужно в Workspace:
@@ -28,9 +30,10 @@
 
 ---------------------------------------------------------------- НАСТРОЙКИ
 local B = 4                -- размер одного блока в студах
-local MAX_RUN = 5          -- сколько одинаковых блоков подряд склеивать в одну деталь
-local BARRIER_HEIGHT = 140 -- высота невидимой стены по внешнему краю
-local MAX_LIGHTS = 120     -- сколько всего светящихся предметов с подсветкой (больше — тормозит)
+local MAX_RUN = 8          -- сколько одинаковых блоков подряд склеивать в одну деталь
+local MAX_STEP = 2         -- самая большая разница высот соседних столбиков холмов (в блоках)
+local BARRIER_HEIGHT = 400 -- высота невидимой стены по внешнему краю (чтобы не улететь от толчка)
+local MAX_LIGHTS = 60      -- сколько всего светящихся предметов с подсветкой (больше — тормозит)
 local EXIT = "auto"        -- куда от спавна идут биомы: "auto", "+X", "-X", "+Z", "-Z"
 local SEED = 7             -- поменяй число, чтобы холмы и предметы встали по-другому
 
@@ -38,7 +41,8 @@ local SEED = 7             -- поменяй число, чтобы холмы �
 local SPAWN_MARGIN = 12    -- свободное место между участками (на максимуме) и холмами, студы
 local SPAWN_ROWS = 8       -- глубина холмов спавна в блоках
 local LANTERN_EVERY = 7    -- фонарь на краю холма через каждые N блоков (0 — без фонарей)
-local PATH_WIDTH = 3       -- ширина тропинки к первому биому в блоках (0 — без тропинки)
+local PATH_WIDTH = 2       -- ширина тропинок от участков к площадке и к выходу, в блоках (0 — без них)
+local PLAZA_RADIUS = 4     -- радиус площадки посреди спавна, где сходятся тропинки (в блоках)
 
 -- Биомы
 local BIOME_ROWS = 7       -- глубина холмов по бокам биома в блоках
@@ -46,6 +50,12 @@ local EDGE_BAND = 2        -- на сколько блоков от края б�
 local KEEP_CLEAR = 3       -- сколько блоков вокруг точек яиц, ворот и босса оставить пустыми
 local GROUND_OVERLAY = true -- застелить пол биома землёй в его стиле
 local CLOUDS = 30          -- сколько облаков над всей картой
+local CREATE_BIOMES = true -- создать недостающие биомы из BIOME_ORDER за первым биомом
+local BIOME_LENGTH_GROWTH = 1.25 -- каждый следующий биом во столько раз длиннее предыдущего
+                                 -- (1 — все как первый). Чем длиннее биом, тем дольше бежать от босса.
+local LANDMARKS = true     -- постройка на склоне у каждого биома (мельница, пирамида, крепость...)
+local FEATURES = true      -- речки, озёра и прочее внутри биомов (без столкновений)
+local BIOME_ORDER = { "Plains", "Forest", "Desert", "Snow", "Swamp", "Underworld", "CrystalCave" }
 
 ---------------------------------------------------------------- ВИДЫ БЛОКОВ
 -- Colors — оттенки (блоки рядом чуть отличаются). Texture — картинка из Config/BlockTextures.
@@ -78,6 +88,10 @@ local KINDS = {
 	Hellrock = { Texture = "Hellrock", Colors = { rgb(120, 40, 40), rgb(110, 34, 36), rgb(130, 46, 44) } },
 	Obsidian = { Texture = "Obsidian", Colors = { rgb(30, 22, 44) } },
 	StoneBrick = { Texture = "StoneBrick", Colors = { rgb(128, 128, 128) } },
+	DarkBrick = { Texture = "StoneBrick", Tint = rgb(120, 60, 64), Colors = { rgb(64, 26, 30) } },
+	SandBrick = { Texture = "StoneBrick", Tint = rgb(240, 220, 160), Colors = { rgb(205, 186, 130) } },
+	Planks = { Texture = "Log", Tint = rgb(235, 205, 160), Colors = { rgb(160, 120, 70) } },
+	Canvas = { Colors = { rgb(235, 228, 210), rgb(225, 218, 200) } },
 	-- Деревья
 	Log = { Texture = "Log", Colors = { rgb(102, 81, 51), rgb(94, 74, 46) } },
 	DeadLog = { Texture = "Log", Tint = rgb(190, 180, 170), Colors = { rgb(110, 96, 80) } },
@@ -374,6 +388,7 @@ local growDepth = maxLevel * (P.GrowDepthSegments or 1) * step
 
 -- Точки, которые должны поместиться внутри спавна: участки на максимуме и всё у них снаружи пола
 local spawnPoints = {}
+local plotFronts = {} -- середина входа каждого участка (откуда идёт тропинка)
 local groundY = math.huge
 local plotCount = 0
 for _, plot in ipairs(plotsFolder:GetChildren()) do
@@ -397,6 +412,7 @@ for _, plot in ipairs(plotsFolder:GetChildren()) do
 			hx, hz = hz, hx
 		end
 		local frame = cf * CFrame.Angles(0, math.rad(angle), 0)
+		table.insert(plotFronts, frame:PointToWorldSpace(Vector3.new(0, 0, hz + B * 0.5)))
 		for _, corner in ipairs({
 			{ -hx - growSide, -hz - growDepth },
 			{ hx + growSide, -hz - growDepth },
@@ -522,6 +538,32 @@ local ALL_SIDES = { Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Left,
 local TOP_ONLY = { Enum.NormalId.Top }
 local SIDES_ONLY = { Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Left, Enum.NormalId.Right }
 
+-- Есть ли у вида блока картинка
+local function hasTexture(kind)
+	local info = KINDS[kind]
+	return info.Texture ~= nil and TEXTURES[info.Texture] ~= nil
+end
+
+-- Картинка вида kind на одну грань детали.
+-- Одна плитка текстуры = один блок, поэтому склеенные блоки всё равно видны по отдельности.
+local function applyTexture(p, kind, face)
+	local info = KINDS[kind]
+	local id = info.Texture and TEXTURES[info.Texture]
+	if not id then
+		return
+	end
+	local t = Instance.new("Texture")
+	t.Texture = "rbxassetid://" .. id
+	t.Face = face
+	t.StudsPerTileU = B
+	t.StudsPerTileV = B
+	t.Color3 = info.Tint or Color3.new(1, 1, 1)
+	t.Transparency = info.Transparency or 0
+	t.Parent = p
+end
+
+-- faces — на какие грани класть картинку (по умолчанию все, кроме низа).
+-- Скрытым граням картинка не нужна: меньше объектов — меньше лагов.
 local function block(parent, name, kind, size, cframe, faces)
 	local info = KINDS[kind]
 	local p = Instance.new("Part")
@@ -535,19 +577,8 @@ local function block(parent, name, kind, size, cframe, faces)
 	p.Reflectance = info.Reflectance or 0
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
-	local id = info.Texture and TEXTURES[info.Texture]
-	if id then
-		-- Одна плитка текстуры = один блок, поэтому склеенные блоки всё равно видны по отдельности
-		for _, face in ipairs(faces or ALL_SIDES) do
-			local t = Instance.new("Texture")
-			t.Texture = "rbxassetid://" .. id
-			t.Face = face
-			t.StudsPerTileU = B
-			t.StudsPerTileV = B
-			t.Color3 = info.Tint or Color3.new(1, 1, 1)
-			t.Transparency = info.Transparency or 0
-			t.Parent = p
-		end
+	for _, face in ipairs(faces or ALL_SIDES) do
+		applyTexture(p, kind, face)
 	end
 	p.Parent = parent
 	partCount += 1
@@ -557,6 +588,20 @@ end
 -- Коробка: u, v — центр, y — низ, размеры в студах
 local function box(parent, kind, u, y, v, su, sy, sv, faces)
 	return block(parent, kind, kind, Vector3.new(su, sy, sv), at(u, y + sy / 2, v), faces)
+end
+
+-- Длинная плоская коробка (пол биома): у деталей Roblox предел 2048 студов,
+-- поэтому длинное режется на куски вдоль v
+local function longBox(parent, kind, u, y, v0, v1, su, sy, faces)
+	local pieces = math.max(1, math.ceil((v1 - v0) / 2000))
+	local step = (v1 - v0) / pieces
+	local first
+	for k = 0, pieces - 1 do
+		local a = v0 + k * step
+		local p = box(parent, kind, u, y, a + step / 2, su, sy, step, faces)
+		first = first or p
+	end
+	return first
 end
 
 -- Мелочь без столкновений: игроки и камера сквозь неё проходят
@@ -878,6 +923,200 @@ PROPS.Tree = function(c)
 	end
 end
 
+---------------------------------------------------------------- ВНУТРИ БИОМОВ: ОСОБЕННОСТИ
+-- Всё плоское или без столкновений — бегать не мешает.
+--   River  — речка поперёк биома (Width блоков), по краям берег Bank.
+--   Pond   — озеро радиусом Radius блоков, по краю Rim.
+--   Meadow — поляна: только растения Plants, без своей земли.
+--   Ring   — круг из растений Plant радиусом Radius (грибной круг и т.п.).
+-- Kind — из чего «вода» (может светиться: Glow). Plants/RimPlants/BankPlants — шанс на клетку.
+local BIOME_FEATURES = {
+	Plains = {
+		{ Type = "River", Kind = "Water", Width = 3, Bank = "Sand", BankPlants = { Reed = 0.12, Flower = 0.1 } },
+		{ Type = "Pond", Kind = "Water", Radius = { 3, 5 }, Rim = "Sand", Plants = { LilyPad = 0.2 }, RimPlants = { Reed = 0.25 } },
+		{ Type = "Meadow", Radius = { 4, 6 }, Plants = { Flower = 0.35, Tuft = 0.25 }, Count = 2 },
+	},
+	Forest = {
+		{ Type = "River", Kind = "Water", Width = 2, Bank = "CoarseDirt", BankPlants = { Fern = 0.3 } },
+		{ Type = "Pond", Kind = "Water", Radius = { 2, 4 }, Rim = "Mud", Plants = { LilyPad = 0.25 }, RimPlants = { Fern = 0.3, Reed = 0.15 } },
+		{ Type = "Ring", Plant = "SmallMushroom", Radius = 3, Count = 2 },
+	},
+	Desert = {
+		{ Type = "Pond", Kind = "Water", Radius = { 4, 6 }, Rim = "GrassTop", Plants = { LilyPad = 0.1 }, RimPlants = { Reed = 0.35, Tuft = 0.25 } },
+		{ Type = "River", Kind = "RedSand", Width = 3, Bank = "Sandstone", BankPlants = { DeadBush = 0.1 } },
+	},
+	Snow = {
+		{ Type = "Pond", Kind = "Ice", Radius = { 6, 9 }, Rim = "Stone" },
+		{ Type = "River", Kind = "Ice", Width = 3 },
+	},
+	Swamp = {
+		{ Type = "River", Kind = "SwampWater", Width = 4, Bank = "Mud", Plants = { LilyPad = 0.12 }, BankPlants = { Reed = 0.3 } },
+		{ Type = "Pond", Kind = "SwampWater", Radius = { 3, 5 }, Rim = "Mud", Plants = { LilyPad = 0.3 }, RimPlants = { Reed = 0.3 }, Count = 2 },
+	},
+	Underworld = {
+		{ Type = "River", Kind = "Lava", Width = 3, Bank = "Ash", Glow = true, BankPlants = { Fire = 0.08 } },
+		{ Type = "Pond", Kind = "Lava", Radius = { 3, 4 }, Rim = "Obsidian", Glow = true },
+	},
+	CrystalCave = {
+		{ Type = "River", Kind = "CrystalCyan", Width = 2, Bank = "CrystalStone", Glow = true, BankPlants = { SmallCrystal = 0.2 } },
+		{ Type = "Pond", Kind = "CrystalPurple", Radius = { 3, 4 }, Rim = "CrystalStone", Glow = true },
+		{ Type = "Ring", Plant = "SmallCrystal", Radius = 3 },
+	},
+}
+
+---------------------------------------------------------------- ПОСТРОЙКИ НА СКЛОНЕ
+-- У каждого биома на одном склоне (по очереди слева и справа) вырезается ровная
+-- площадка, на ней стоит постройка. Игроки туда не забираются (склон крутой),
+-- поэтому бегать постройки не мешают, а из биома их хорошо видно.
+-- c = { Parent, U, V (середина площадки), Y (её верх), Inward (+1/-1 — в сторону биома), Theme }
+local BIOME_LANDMARKS = {
+	Plains = "Windmill", Forest = "GreatTree", Desert = "Pyramid", Snow = "Igloo",
+	Swamp = "WitchHut", Underworld = "Fortress", CrystalCave = "Geode",
+}
+
+-- Коробка в блоках от середины площадки: du > 0 — к биому, y — низ, su/sy/sv — размер
+local function lb(c, kind, du, y, dv, su, sy, sv, faces)
+	return box(c.Parent, kind, c.U + du * c.Inward * B, c.Y + y * B, c.V + dv * B, su * B, sy * B, sv * B, faces)
+end
+local function lbLeaves(c, kind, du, y, dv, su, sy, sv)
+	local p = lb(c, kind, du, y, dv, su, sy, sv)
+	p.CanCollide = false
+	return p
+end
+
+local LANDMARK_BUILDERS = {}
+
+-- Мельница: каменный низ, деревянная башня, крыша ступеньками и крылья крестом
+LANDMARK_BUILDERS.Windmill = function(c)
+	lb(c, "StoneBrick", 0, 0, 0, 3, 2, 3)
+	lb(c, "Planks", 0, 2, 0, 3, 6, 3)
+	lb(c, "Log", 0, 8, 0, 3.5, 0.5, 3.5)
+	lb(c, "Log", 0, 8.5, 0, 2, 1, 2)
+	lb(c, "Log", 0, 9.5, 0, 1, 1, 1)
+	lb(c, "Coal", 1.52, 0, 0, 0.05, 1.5, 1)
+	glow(lb(c, "Glow", 1.52, 4.5, 0, 0.05, 1, 1), 12, 0.8)
+	local hubU = c.U + c.Inward * 1.75 * B
+	local hubY = c.Y + 6.5 * B
+	block(c.Parent, "Log", "Log", Vector3.new(0.6 * B, 0.6 * B, 0.6 * B), at(hubU, hubY, c.V))
+	for k = 0, 3 do
+		local cf = at(hubU + c.Inward * 0.4, hubY, c.V) * CFrame.Angles(math.rad(45 + k * 90), 0, 0)
+		block(c.Parent, "Log", "Log", Vector3.new(0.3, 4.5 * B, 0.3), cf * CFrame.new(0, 2.25 * B, 0))
+		block(c.Parent, "Canvas", "Canvas", Vector3.new(0.15, 3.5 * B, 1.2 * B), cf * CFrame.new(0, 2.6 * B, 0.65 * B))
+	end
+	lb(c, "Hay", -1, 0, 3.5, 1, 1, 1)
+	lb(c, "Hay", 0, 0, 3.5, 1, 1, 1)
+	lb(c, "Hay", -0.5, 1, 3.5, 1, 1, 1)
+	lb(c, "Hay", 0.5, 0, -3.5, 1, 1, 1)
+end
+
+-- Огромное дерево: ствол 2x2, корни и широкая крона в четыре яруса
+LANDMARK_BUILDERS.GreatTree = function(c)
+	lb(c, "Log", 0, 0, 0, 2, 13, 2)
+	for _, r in ipairs({ { 1.5, 0 }, { -1.5, 0 }, { 0, 1.5 }, { 0, -1.5 } }) do
+		lb(c, "Log", r[1], 0, r[2], 1, 1.5, 1)
+	end
+	lbLeaves(c, "Leaves", 0, 10, 0, 9, 2, 7)
+	lbLeaves(c, "Leaves", 0, 10, -4, 7, 2, 1)
+	lbLeaves(c, "Leaves", 0, 10, 4, 7, 2, 1)
+	lbLeaves(c, "Leaves", 0, 12, 0, 7, 2, 5)
+	lbLeaves(c, "Leaves", 0, 12, -3, 5, 2, 1)
+	lbLeaves(c, "Leaves", 0, 12, 3, 5, 2, 1)
+	lbLeaves(c, "Leaves", 0, 14, 0, 5, 1, 3)
+	lbLeaves(c, "Leaves", 0, 14, -2, 3, 1, 1)
+	lbLeaves(c, "Leaves", 0, 14, 2, 3, 1, 1)
+	lbLeaves(c, "Leaves", 0, 15, 0, 3, 1, 3)
+	-- Светлячки под кроной
+	for _ = 1, 5 do
+		local p = decor(lb(c, "Glow", rng:NextNumber(-3, 3), rng:NextNumber(5, 9), rng:NextNumber(-4, 4), 0.12, 0.12, 0.12))
+		glow(p, 8, 0.6)
+	end
+end
+
+-- Пирамида ступеньками, вход со стороны биома и два обелиска
+LANDMARK_BUILDERS.Pyramid = function(c)
+	for k, s in ipairs({ 6, 4.5, 3, 1.5 }) do
+		lb(c, "SandBrick", 0, (k - 1) * 1.5, 0, s, 1.5, s)
+	end
+	lb(c, "Coal", 3.02, 0, 0, 0.05, 1.5, 1)
+	glow(lb(c, "Glow", 0, 6, 0, 0.6, 0.6, 0.6), 20, 1.2)
+	for _, s in ipairs({ -1, 1 }) do
+		lb(c, "Sandstone", 2.4, 0, s * 4.5, 1, 4, 1)
+		lb(c, "SandBrick", 2.4, 4, s * 4.5, 0.6, 0.6, 0.6)
+	end
+end
+
+-- Иглу с тоннелем ко входу, снеговик и ёлка
+LANDMARK_BUILDERS.Igloo = function(c)
+	lb(c, "Snow", -0.6, 0, 0, 5, 2, 3)
+	lb(c, "Snow", -0.6, 0, -2, 3, 2, 1)
+	lb(c, "Snow", -0.6, 0, 2, 3, 2, 1)
+	lb(c, "Snow", -0.6, 2, 0, 3, 1, 3)
+	lb(c, "Snow", -0.6, 3, 0, 1, 0.5, 1)
+	lb(c, "Snow", 2.2, 0, 0, 1.2, 1.4, 1.6)
+	lb(c, "Coal", 2.82, 0, 0, 0.05, 1, 0.8)
+	PROPS.Snowman({ Parent = c.Parent, U = c.U + c.Inward * B, V = c.V + 4.5 * B, Y = c.Y, Inward = c.Inward, Theme = c.Theme })
+	tree("SnowySpruce", c.Parent, c.U - c.Inward * B, c.V - 4.5 * B, c.Y)
+end
+
+-- Хижина на сваях с лесенкой, светящимся окном и котлом
+LANDMARK_BUILDERS.WitchHut = function(c)
+	for _, s in ipairs({ { -1.5, -1.5 }, { 1.5, -1.5 }, { -1.5, 1.5 }, { 1.5, 1.5 } }) do
+		lb(c, "Log", s[1], 0, s[2], 0.5, 3, 0.5)
+	end
+	lb(c, "Planks", 0, 3, 0, 4, 0.4, 4)
+	lb(c, "SpruceLog", 0, 3.4, 0, 3.4, 2.6, 3.4)
+	lb(c, "Planks", 0, 6, 0, 4.4, 0.5, 4.4)
+	lb(c, "Planks", 0, 6.5, 0, 3, 0.5, 3)
+	lb(c, "Planks", 0, 7, 0, 1.6, 0.5, 1.6)
+	glow(lb(c, "Glow", 1.72, 4.3, 0.7, 0.05, 0.8, 0.8), 12, 0.8)
+	lb(c, "Coal", 1.72, 3.4, -0.7, 0.05, 1.6, 0.8)
+	for k = 1, 3 do
+		lb(c, "Planks", 2 + k * 0.45, 3 - k * 0.8, -0.7, 0.45, 0.2, 0.8)
+	end
+	lb(c, "Coal", -0.5, 0, 3.6, 1, 0.8, 1)
+	glow(decor(lb(c, "Lily", -0.5, 0.8, 3.6, 0.8, 0.05, 0.8)), 10, 0.8)
+	for _ = 1, 6 do
+		local du, dv = rng:NextNumber(-2, 2), (rng:NextNumber() < 0.5 and -2.05 or 2.05)
+		decor(lb(c, "Vine", du, 3 - rng:NextNumber(0.5, 1.5), dv, 0.6, rng:NextNumber(0.5, 1.5), 0.08))
+	end
+end
+
+-- Адская крепость: две башни с зубцами, стена с тёмным проёмом, лава перед воротами
+LANDMARK_BUILDERS.Fortress = function(c)
+	for _, s in ipairs({ -1, 1 }) do
+		lb(c, "DarkBrick", 0, 0, s * 4.5, 3, 9, 3)
+		for _, q in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+			lb(c, "DarkBrick", q[1], 9, s * 4.5 + q[2], 1, 1, 1)
+		end
+		glow(lb(c, "Fire", 1.52, 6, s * 4.5, 0.05, 1.5, 1), 14, 1)
+		PLANTS.Fire(c.Parent, c.U, c.Y + 9 * B, c.V + s * 4.5 * B)
+	end
+	lb(c, "DarkBrick", 0, 0, -2.25, 2, 6, 1.5)
+	lb(c, "DarkBrick", 0, 0, 2.25, 2, 6, 1.5)
+	lb(c, "DarkBrick", 0, 4, 0, 2, 2, 3)
+	lb(c, "Coal", 0, 0, 0, 0.2, 4, 3)
+	for k = -1, 1 do
+		lb(c, "DarkBrick", 0, 6, k * 1.5, 1, 1, 0.8)
+	end
+	glow(decor(lb(c, "Lava", 2.2, 0, 0, 1.6, 0.15, 5)), 18, 1.2)
+end
+
+-- Жеода: веер огромных светящихся кристаллов и кристальный пруд
+LANDMARK_BUILDERS.Geode = function(c)
+	for k = 1, 9 do
+		local kind = CRYSTALS[rng:NextInteger(1, #CRYSTALS)]
+		local h = rng:NextNumber(3, 7) * B
+		local w = rng:NextNumber(1.2, 2.2) * B
+		local part = block(c.Parent, "Crystal", kind, Vector3.new(w, h, w),
+			at(c.U + rng:NextNumber(-2, 1.5) * c.Inward * B, c.Y + h / 2 - B, c.V + rng:NextNumber(-5, 5) * B)
+				* CFrame.Angles(math.rad(rng:NextNumber(-30, 30)), 0, math.rad(rng:NextNumber(-30, 30))))
+		if k <= 3 then
+			glow(part, 24, 1.5)
+		end
+	end
+	decor(lb(c, "CrystalCyan", 2, 0, 0, 1.6, 0.15, 4))
+end
+
 ---------------------------------------------------------------- ОБЛАСТИ: СПАВН И БИОМЫ
 -- У каждой области: прямоугольник клеток внутри (I0..I1, J0..J1), высота пола, стиль.
 local regions = {}
@@ -940,6 +1179,219 @@ local function findFloor(model, areaPart, areaCf, areaSize)
 	return hits[math.ceil(#hits / 2)]
 end
 
+---------------------------------------------------------------- НОВЫЕ БИОМЫ
+-- Биомы из BIOME_ORDER после первого (Plains) скрипт делает сам, друг за другом.
+-- Ширина — как у первого, длина растёт: каждый следующий в BIOME_LENGTH_GROWTH раз
+-- длиннее предыдущего (чем дальше биом, тем дольше бежать от босса).
+-- В новом биоме: Area (невидимый объём), Floor (пол), Gate (копия ворот первого биома
+-- у входа), BossSpawn (где спит босс — там же, где у первого) и EggSpawns (точки яиц).
+--
+-- Созданные скриптом биомы помечены атрибутом AutoBiome и при каждом запуске
+-- перестраиваются под текущие настройки. То, что ты добавил в такой биом сам
+-- (модель босса и т.п.), переносится в новый биом на то же место относительно входа.
+-- Биом, который ты сделал сам (без метки), скрипт не трогает: следующие встанут за ним.
+-- Чтобы скрипт больше не перестраивал биом — убери у модели атрибут AutoBiome.
+local createdBiomes = {}
+if CREATE_BIOMES then
+	local OUR_PARTS = { Area = true, Floor = true, Gate = true, BossSpawn = true, EggSpawns = true }
+	-- Биом этого скрипта: с меткой или (от прошлой версии) только из наших деталей
+	local function isAuto(model)
+		if model:GetAttribute("AutoBiome") then
+			return true
+		end
+		for _, child in ipairs(model:GetChildren()) do
+			if not OUR_PARTS[child.Name] then
+				return false
+			end
+		end
+		local floor = model:FindFirstChild("Floor")
+		return floor ~= nil and floor:IsA("BasePart") and math.abs(floor.Size.Y - 4) < 0.01
+			and model:FindFirstChild("BossSpawn") ~= nil
+	end
+	local function areaOf(model)
+		local a = model:FindFirstChild("Area", true)
+		return (a and a:IsA("BasePart")) and a or model
+	end
+	-- Сдвинуть детали и модели вместе со всем внутри (папки — по содержимому)
+	local function shift(instance, offset)
+		if instance:IsA("PVInstance") then
+			instance:PivotTo(instance:GetPivot() + offset)
+		else
+			for _, child in ipairs(instance:GetChildren()) do
+				shift(child, offset)
+			end
+		end
+	end
+
+	local byName = {}
+	for _, m in ipairs(biomeModels) do
+		byName[string.gsub(m.Name, "%s", "")] = m
+	end
+	local template = byName[BIOME_ORDER[1]]
+	if not template or isAuto(template) then
+		warn("[BlockWorld] Нет биома " .. BIOME_ORDER[1] .. " — по нему считается размер остальных. Новые биомы не созданы.")
+	else
+		if not biomesFolder then
+			biomesFolder = Instance.new("Folder")
+			biomesFolder.Name = "Biomes"
+			biomesFolder.Parent = workspace
+		end
+		local tAreaPart = areaOf(template)
+		tAreaPart = tAreaPart:IsA("BasePart") and tAreaPart or nil
+		local tu0, tu1, tv0, tv1, tcf, tsize = rectOf(tAreaPart or template)
+		local tFloor = findFloor(template, tAreaPart, tcf, tsize)
+		local width = tu1 - tu0
+		local areaH = tAreaPart and tAreaPart.Size.Y or 60
+		local areaMidY = tAreaPart and (tAreaPart.Position.Y - tFloor) or areaH / 2
+		local cu = (tu0 + tu1) / 2
+
+		-- Где у первого биома спит босс (доля длины от входа) и на какой высоте точки яиц
+		local bossU, bossT, bossY = cu, 0.75, 0
+		local tBossSpawn = template:FindFirstChild("BossSpawn", true)
+		local bossThing = (tBossSpawn and tBossSpawn:IsA("BasePart")) and tBossSpawn or nil
+		if not bossThing then
+			for _, d in ipairs(template:GetDescendants()) do
+				if d:IsA("Humanoid") and d.Parent:IsA("Model") then
+					bossThing = d.Parent
+					break
+				end
+			end
+		end
+		if bossThing then
+			local cf, size = boxOf(bossThing)
+			local u, v = toUV(cf.Position)
+			bossU, bossT = u, math.clamp((v - tv0) / (tv1 - tv0), 0.1, 0.95)
+			bossY = bossThing:IsA("BasePart") and (cf.Position.Y - tFloor) or (cf.Position.Y - size.Y / 2 - tFloor)
+		end
+		local eggCount, eggY = 10, 1
+		local tSpawns = template:FindFirstChild("EggSpawns", true)
+		if tSpawns then
+			local heights = {}
+			for _, d in ipairs(tSpawns:GetDescendants()) do
+				if d:IsA("BasePart") then
+					table.insert(heights, d.Position.Y - tFloor)
+				end
+			end
+			if #heights > 0 then
+				table.sort(heights)
+				eggCount, eggY = #heights, heights[math.ceil(#heights / 2)]
+			end
+		end
+		local tGate = template:FindFirstChild("Gate", true)
+
+		local function marker(parent, name, size, cframe)
+			local p = Instance.new("Part")
+			p.Name = name
+			p.Anchored = true
+			p.Size = size
+			p.CFrame = cframe
+			p.Transparency = 1
+			p.CanCollide = false
+			p.CanQuery = false
+			p.CanTouch = false
+			p.Parent = parent
+			return p
+		end
+
+		local startV = tv1
+		local length = tv1 - tv0
+		for index = 2, #BIOME_ORDER do
+			local name = BIOME_ORDER[index]
+			length *= BIOME_LENGTH_GROWTH
+			local existing = byName[name]
+			if existing and not isAuto(existing) then
+				-- Биом автора: не трогаем, следующий встанет сразу за ним
+				local _, _, ev0, ev1 = rectOf(areaOf(existing))
+				startV, length = ev1, ev1 - ev0
+			else
+				local theme = THEMES[name] or THEMES.Plains
+				local v0, v1 = startV, startV + length
+				local cv = (v0 + v1) / 2
+				local model = Instance.new("Model")
+				model.Name = name
+				model:SetAttribute("AutoBiome", true)
+
+				marker(model, "Area", Vector3.new(width, areaH, length), at(cu, tFloor + areaMidY, cv))
+
+				-- Пол (кусками, если биом длиннее 2000 студов)
+				local pieces = math.max(1, math.ceil(length / 2000))
+				local firstFloor
+				for k = 0, pieces - 1 do
+					local floor = Instance.new("Part")
+					floor.Name = "Floor"
+					floor.Anchored = true
+					floor.Size = Vector3.new(width, 4, length / pieces)
+					floor.CFrame = at(cu, tFloor - 2, v0 + (k + 0.5) * length / pieces)
+					floor.Color = KINDS[theme.Ground or "GrassTop"].Colors[1]
+					floor.Material = Enum.Material.SmoothPlastic
+					floor.TopSurface = Enum.SurfaceType.Smooth
+					floor.Parent = model
+					firstFloor = firstFloor or floor
+				end
+				model.PrimaryPart = firstFloor
+
+				-- Ворота: копия ворот первого биома на том же месте относительно входа
+				if tGate then
+					local gate = tGate:Clone()
+					gate.Name = "Gate"
+					shift(gate, exitDir * (v0 - tv0))
+					gate.Parent = model
+				else
+					marker(model, "Gate", Vector3.new(width, 40, 8), at(cu, tFloor + 20, v0 + 4))
+				end
+
+				-- Место сна босса (лицом ко входу)
+				local bossV = v0 + bossT * length
+				marker(model, "BossSpawn", Vector3.new(2, 1, 2), at(bossU, tFloor + bossY, bossV))
+
+				-- Точки яиц: посередине по ширине, не у входа и не у босса.
+				-- В длинном биоме точек больше, чтобы яйца были по всей длине.
+				local spawnsFolder = Instance.new("Folder")
+				spawnsFolder.Name = "EggSpawns"
+				spawnsFolder.Parent = model
+				local count = math.floor(eggCount * length / (tv1 - tv0) + 0.5)
+				local placed = {}
+				local bossPoint = Vector2.new(bossU, bossV)
+				for _ = 1, count * 30 do
+					if #placed >= count then
+						break
+					end
+					local p = Vector2.new(rng:NextNumber(cu - width * 0.3, cu + width * 0.3), rng:NextNumber(v0 + length * 0.12, v1 - length * 0.08))
+					local ok = (p - bossPoint).Magnitude > 20
+					for _, other in ipairs(placed) do
+						if (p - other).Magnitude < 16 then
+							ok = false
+							break
+						end
+					end
+					if ok then
+						table.insert(placed, p)
+						marker(spawnsFolder, "EggSpawn", Vector3.new(1, 1, 1), at(p.X, tFloor + eggY, p.Y))
+					end
+				end
+
+				-- Старый созданный биом: переносим то, что добавил автор, и удаляем
+				if existing then
+					local _, _, ov0 = rectOf(areaOf(existing))
+					for _, child in ipairs(existing:GetChildren()) do
+						if not OUR_PARTS[child.Name] then
+							shift(child, exitDir * (v0 - ov0))
+							child.Parent = model
+						end
+					end
+					existing:Destroy()
+					table.remove(biomeModels, table.find(biomeModels, existing))
+				end
+
+				model.Parent = biomesFolder
+				table.insert(biomeModels, model)
+				table.insert(createdBiomes, string.format("%s (%d студов)", name, math.floor(length + 0.5)))
+				startV = v1
+			end
+		end
+	end
+end
+
 local missingThemes = {}
 for _, model in ipairs(biomeModels) do
 	local themeName = string.gsub(model.Name, "%s", "")
@@ -947,6 +1399,7 @@ for _, model in ipairs(biomeModels) do
 	if not theme or themeName == "Spawn" then
 		table.insert(missingThemes, model.Name)
 		theme = THEMES.Plains
+		themeName = "Plains"
 	end
 	local area = model:FindFirstChild("Area", true)
 	local areaPart = (area and area:IsA("BasePart")) and area or nil
@@ -958,6 +1411,7 @@ for _, model in ipairs(biomeModels) do
 		Name = model.Name,
 		Model = model,
 		Theme = theme,
+		ThemeName = themeName,
 		I0 = roundCell(u0), I1 = roundCell(u1) - 1,
 		J0 = roundCell(v0), J1 = roundCell(v1) - 1,
 		Y = findFloor(model, areaPart, cf, size),
@@ -1046,18 +1500,152 @@ do
 	end
 end
 
----------------------------------------------------------------- ХОЛМЫ: СТРОИМ
--- Столбик (или несколько одинаковых подряд): верхний слой, FillDepth блоков, ниже Deep
-local function column(parent, theme, baseY, h, u, v, sizeU)
-	local top = baseY + h * B
-	block(parent, theme.Top, theme.Top, Vector3.new(sizeU, CAP, B), at(u, top + CAP / 2, v), TOP_ONLY)
-	local fillBlocks = math.min(h, theme.FillDepth or 3)
-	local fillH = fillBlocks * B
-	block(parent, theme.Fill, theme.Fill, Vector3.new(sizeU, fillH, B), at(u, top - fillH / 2, v), SIDES_ONLY)
-	local deepH = (h - fillBlocks) * B
-	if deepH > 0 then
-		block(parent, theme.Deep, theme.Deep, Vector3.new(sizeU, deepH, B), at(u, baseY + deepH / 2, v), SIDES_ONLY)
+---------------------------------------------------------------- ХОЛМЫ: ВЫСОТА БЕЗ ОБРЫВОВ
+-- Высота холма зависит от расстояния до ближайшей открытой площадки — спавна или
+-- ЛЮБОГО биома, а не только своего. Иначе там, где холмы спавна встречаются с холмами
+-- биома, низкий край одного стоит вплотную к высокому краю другого и выходит обрыв.
+-- Потом соседние столбики выравниваются: разница не больше MAX_STEP блоков.
+local NEIGHBORS = {}
+for di = -1, 1 do
+	for dj = -1, 1 do
+		if di ~= 0 or dj ~= 0 then
+			table.insert(NEIGHBORS, { di, dj })
+		end
 	end
+end
+
+local dist = {}
+local queue, head = {}, 1
+for _, region in ipairs({ spawnRegion, table.unpack(regions) }) do
+	for i = region.I0, region.I1 do
+		for j = region.J0, region.J1 do
+			local k = key(i, j)
+			if dist[k] == nil then
+				dist[k] = 0
+				table.insert(queue, { i, j })
+			end
+		end
+	end
+end
+while head <= #queue do
+	local c = queue[head]
+	head += 1
+	local d = dist[key(c[1], c[2])]
+	for _, n in ipairs(NEIGHBORS) do
+		local i, j = c[1] + n[1], c[2] + n[2]
+		local k = key(i, j)
+		if hills[k] and dist[k] == nil then
+			dist[k] = d + 1
+			table.insert(queue, { i, j })
+		end
+	end
+end
+
+for j = minJ, maxJ do
+	for i = minI, maxI do
+		local k = key(i, j)
+		local cell = hills[k]
+		if cell then
+			local theme = cell.Theme
+			cell.R = math.clamp(dist[k] or cell.Rows, 1, cell.Rows)
+			local t = cell.Rows > 1 and (cell.R - 1) / (cell.Rows - 1) or 1
+			local h = theme.MinHeight + t * (theme.MaxHeight - theme.MinHeight)
+				+ math.noise(i * 0.17, j * 0.17, SEED + 0.5) * (theme.Bumps or 2) * 2
+			cell.H = math.max(theme.MinHeight, math.floor(h + 0.5))
+		end
+	end
+end
+
+-- Площадка под постройку: на склоне биома (по очереди слева и справа), со 2-го ряда
+-- холмов до последнего, 12 блоков в длину. Высота — на блок выше нижнего ряда, а
+-- ближний ряд игрок не перепрыгнет, поэтому на площадку он не залезет.
+if LANDMARKS then
+	for index, region in ipairs(regions) do
+		local name = BIOME_LANDMARKS[region.ThemeName]
+		if name then
+			local side = index % 2 == 1 and -1 or 1
+			local midJ = math.floor((region.J0 + region.J1) / 2)
+			local pj0, pj1 = math.max(region.J0, midJ - 6), math.min(region.J1, midJ + 5)
+			local pi0, pi1
+			if side < 0 then
+				pi0, pi1 = region.I0 - region.Rows, region.I0 - 2
+			else
+				pi0, pi1 = region.I1 + 2, region.I1 + region.Rows
+			end
+			local ok = true
+			for i = pi0, pi1 do
+				for j = pj0, pj1 do
+					local cell = hills[key(i, j)]
+					if not cell or cell.Region ~= region then
+						ok = false
+					end
+				end
+			end
+			if ok then
+				local h = region.Theme.MinHeight + 1
+				for i = pi0, pi1 do
+					for j = pj0, pj1 do
+						local cell = hills[key(i, j)]
+						cell.H = h
+						cell.Plateau = true
+					end
+				end
+				region.Plateau = { I0 = pi0, I1 = pi1, J0 = pj0, J1 = pj1, Inward = -side, Name = name }
+			end
+		end
+	end
+end
+
+for _ = 1, 40 do
+	local changed = false
+	for j = minJ, maxJ do
+		for i = minI, maxI do
+			local cell = hills[key(i, j)]
+			if cell then
+				for _, n in ipairs(NEIGHBORS) do
+					local other = hills[key(i + n[1], j + n[2])]
+					if other then
+						local limit = other.Y + (other.H + MAX_STEP) * B
+						if cell.Y + cell.H * B > limit + 0.01 then
+							cell.H = math.max(1, math.floor((limit - cell.Y) / B + 0.01))
+							changed = true
+						end
+					end
+				end
+			end
+		end
+	end
+	if not changed then
+		break
+	end
+end
+
+---------------------------------------------------------------- ХОЛМЫ: СТРОИМ
+-- Строится только то, что видит игрок («оболочка»): столбик идёт вниз не до земли,
+-- а до верха самого низкого соседа — ниже его всё равно закрывают соседи.
+-- Сзади холмов (за краем карты) — только верхний блок. Картинки — только на видимых
+-- гранях, а трава сверху — картинкой на верхней грани, без отдельной детали.
+-- Отдельный тонкий слой сверху ставится, только если у верхнего блока нет картинки.
+local function hasCap(theme)
+	return not hasTexture(theme.Top)
+end
+
+local function topOf(cell)
+	return cell.Y + cell.H * B + (hasCap(cell.Theme) and CAP or 0)
+end
+
+-- Верх соседней клетки и видна ли с той стороны грань (за краем карты — не видна)
+local function neighborTop(i, j)
+	local k = key(i, j)
+	local n = hills[k]
+	if n then
+		return n.Y + n.H * B, true
+	end
+	local inside = interior[k]
+	if inside then
+		return inside.Y, true
+	end
+	return nil, false
 end
 
 for j = minJ, maxJ do
@@ -1075,15 +1663,51 @@ for j = minJ, maxJ do
 				end
 				last += 1
 			end
+			local theme = cell.Theme
+			local top = cell.Y + cell.H * B
+			local bottom = top - B -- хотя бы один блок
+			local visible = {}
+			local function look(ni, nj, face)
+				local nTop, seen = neighborTop(ni, nj)
+				if seen and nTop < top - 0.01 then
+					bottom = math.min(bottom, nTop)
+					visible[face] = true
+				end
+			end
+			look(i - 1, j, Enum.NormalId.Left)
+			look(last + 1, j, Enum.NormalId.Right)
+			for ii = i, last do
+				look(ii, j - 1, Enum.NormalId.Front)
+				look(ii, j + 1, Enum.NormalId.Back)
+			end
+			-- Низ — по сетке блоков, чтобы картинки ложились ровно
+			bottom = cell.Y + math.max(0, math.floor((bottom - cell.Y) / B + 0.01)) * B
+			local faces = {}
+			for _, face in ipairs(SIDES_ONLY) do
+				if visible[face] then
+					table.insert(faces, face)
+				end
+			end
+
 			local len = last - i + 1
-			column(folderOf(cell.Region.Name, "Hills"), cell.Theme, cell.Y, cell.H, (i + len / 2) * B, (j + 0.5) * B, len * B)
+			local u, v, sizeU = (i + len / 2) * B, (j + 0.5) * B, len * B
+			local parent = folderOf(cell.Region.Name, "Hills")
+			local fillBottom = math.max(bottom, top - (theme.FillDepth or 3) * B)
+			local fill = block(parent, theme.Fill, theme.Fill, Vector3.new(sizeU, top - fillBottom, B),
+				at(u, (top + fillBottom) / 2, v), faces)
+			if hasCap(theme) then
+				block(parent, theme.Top, theme.Top, Vector3.new(sizeU, CAP, B), at(u, top + CAP / 2, v), TOP_ONLY)
+			else
+				applyTexture(fill, theme.Top, Enum.NormalId.Top)
+				fill.Color = KINDS[theme.Top].Colors[1]
+			end
+			if bottom < fillBottom - 0.01 then
+				block(parent, theme.Deep, theme.Deep, Vector3.new(sizeU, fillBottom - bottom, B),
+					at(u, (fillBottom + bottom) / 2, v), faces)
+			end
 			i = last + 1
 		end
 	end
-end
-
-local function topOf(cell)
-	return cell.Y + cell.H * B + CAP
 end
 
 ---------------------------------------------------------------- ХОЛМЫ: ДЕРЕВЬЯ, ПРЕДМЕТЫ, ФОНАРИ
@@ -1105,6 +1729,18 @@ local function farFromInterior(i, j, radius)
 		end
 	end
 	return true
+end
+
+-- Площадки под постройки (и по 2 блока вокруг) — без деревьев и мелочи
+for _, region in ipairs(regions) do
+	local p = region.Plateau
+	if p then
+		for i = p.I0 - 2, p.I1 + 2 do
+			for j = p.J0 - 2, p.J1 + 2 do
+				blocked[key(i, j)] = true
+			end
+		end
+	end
 end
 
 local placedTrees = {}
@@ -1163,6 +1799,24 @@ for j = minJ, maxJ do
 	end
 end
 
+-- Постройки на площадках
+local landmarkCount = 0
+for _, region in ipairs(regions) do
+	local p = region.Plateau
+	local cell = p and hills[key(p.I0, p.J0)]
+	if cell then
+		LANDMARK_BUILDERS[p.Name]({
+			Parent = folderOf(region.Name, "Landmark"),
+			U = (p.I0 + p.I1 + 1) / 2 * B,
+			V = (p.J0 + p.J1 + 1) / 2 * B,
+			Y = topOf(cell),
+			Inward = p.Inward,
+			Theme = region.Theme,
+		})
+		landmarkCount += 1
+	end
+end
+
 ---------------------------------------------------------------- ЗЕМЛЯ СПАВНА И ТРОПИНКА
 do
 	local s = spawnRegion
@@ -1171,16 +1825,62 @@ do
 	local v0, v1 = s.J0 * B, (s.J1 + 1) * B
 	box(folderOf("Spawn", "Ground"), "GrassTop", (u0 + u1) / 2, s.Y + lift - 4, (v0 + v1) / 2, u1 - u0, 4, v1 - v0, TOP_ONLY)
 
-	-- Тропинка от середины спавна к первому биому, неровная по краям
+	-- Тропинки: от входа каждого участка к круглой площадке посреди спавна,
+	-- и от площадки к проходу в первый биом. Плоские, бегать не мешают.
 	local first = regions[1]
 	if PATH_WIDTH > 0 then
-		local pathU = first and (first.I0 + first.I1 + 1) / 2 * B or (u0 + u1) / 2
-		pathU = math.clamp(pathU, u0 + PATH_WIDTH * B, u1 - PATH_WIDTH * B)
+		local pathCells = {}
+		local lo = -math.floor(PATH_WIDTH / 2)
+		local function stamp(u, v)
+			local ci, cj = cellOf(u, v)
+			for di = lo, lo + PATH_WIDTH - 1 do
+				for dj = lo, lo + PATH_WIDTH - 1 do
+					local i, j = ci + di, cj + dj
+					if i >= s.I0 and i <= s.I1 and j >= s.J0 and j <= s.J1 then
+						pathCells[key(i, j)] = true
+					end
+				end
+			end
+		end
+		local function line(au, av, bu, bv)
+			local steps = math.max(1, math.ceil(math.sqrt((bu - au) ^ 2 + (bv - av) ^ 2) / (B * 0.5)))
+			for t = 0, steps do
+				local a = t / steps
+				stamp(au + (bu - au) * a, av + (bv - av) * a)
+			end
+		end
+		local cu, cv = (u0 + u1) / 2, (v0 + v1) / 2
+		local exitU = first and (first.I0 + first.I1 + 1) / 2 * B or cu
+		for _, front in ipairs(plotFronts) do
+			local fu, fv = toUV(front)
+			line(fu, fv, cu, cv)
+		end
+		line(cu, cv, exitU, v1)
+		-- Площадка: круг с неровным краем
+		local ci, cj = cellOf(cu, cv)
+		for di = -PLAZA_RADIUS - 1, PLAZA_RADIUS + 1 do
+			for dj = -PLAZA_RADIUS - 1, PLAZA_RADIUS + 1 do
+				if math.sqrt(di * di + dj * dj) <= PLAZA_RADIUS + math.noise(di * 0.5, dj * 0.5, SEED) then
+					pathCells[key(ci + di, cj + dj)] = true
+				end
+			end
+		end
 		local parent = folderOf("Spawn", "Path")
-		for j = math.floor((s.J0 + s.J1) / 2), s.J1 do
-			local width = PATH_WIDTH + rng:NextInteger(-1, 1)
-			local shift = rng:NextInteger(-1, 1) * 0.5 * B
-			decor(box(parent, "Path", pathU + shift, s.Y + lift, (j + 0.5) * B, width * B, 0.2, B, TOP_ONLY))
+		for j = s.J0, s.J1 do
+			local i = s.I0
+			while i <= s.I1 do
+				if pathCells[key(i, j)] then
+					local last = i
+					while last + 1 <= s.I1 and pathCells[key(last + 1, j)] do
+						last += 1
+					end
+					local len = last - i + 1
+					decor(box(parent, "Path", (i + len / 2) * B, s.Y + lift, (j + 0.5) * B, len * B, 0.2, B, TOP_ONLY))
+					i = last + 1
+				else
+					i += 1
+				end
+			end
 		end
 	end
 
@@ -1245,11 +1945,123 @@ for _, region in ipairs(regions) do
 	local u0, u1 = region.I0 * B, (region.I1 + 1) * B
 	local v0, v1 = region.J0 * B, (region.J1 + 1) * B
 	if GROUND_OVERLAY and theme.Ground then
-		box(folderOf(region.Name, "Ground"), theme.Ground, (u0 + u1) / 2, region.Y, (v0 + v1) / 2, u1 - u0, 0.2, v1 - v0, TOP_ONLY)
+		longBox(folderOf(region.Name, "Ground"), theme.Ground, (u0 + u1) / 2, region.Y, v0, v1, u1 - u0, 0.2, TOP_ONLY)
+	end
+
+	local patchOf = {} -- [key] = что лежит на клетке пола (особенность или пятно)
+
+	-- Особенности биома: речки, озёра, поляны, круги из растений (всё без столкновений)
+	if FEATURES and BIOME_FEATURES[region.ThemeName] then
+		local plantsHere = folderOf(region.Name, "Plants")
+		local featureFolder = folderOf(region.Name, "Features")
+		local function inside(i, j)
+			return i >= region.I0 and i <= region.I1 and j >= region.J0 and j <= region.J1
+		end
+		local function mark(i, j, spec)
+			local k = key(i, j)
+			if inside(i, j) and not patchOf[k] then
+				patchOf[k] = spec
+				return true
+			end
+			return false
+		end
+		-- Круглое пятно с неровным краем
+		local function blob(ci, cj, r)
+			local cells = {}
+			for di = -r - 1, r + 1 do
+				for dj = -r - 1, r + 1 do
+					if math.sqrt(di * di + dj * dj) <= r + math.noise(di * 0.35, dj * 0.35, ci * 0.1 + SEED) * 1.5 then
+						table.insert(cells, { ci + di, cj + dj })
+					end
+				end
+			end
+			return cells
+		end
+		local spanI, spanJ = region.I1 - region.I0, region.J1 - region.J0
+		for _, f in ipairs(BIOME_FEATURES[region.ThemeName]) do
+			for _ = 1, f.Count or 1 do
+				local main = { Kind = f.Kind, Plants = f.Plants, Glow = f.Glow }
+				local edge = f.Rim or f.Bank
+				local rim = edge and { Kind = edge, Plants = f.RimPlants or f.BankPlants } or nil
+				local cells = {}
+				if f.Type == "River" then
+					-- Речка поперёк биома, извилистая
+					local baseJ = region.J0 + rng:NextInteger(math.floor(spanJ * 0.3), math.floor(spanJ * 0.8))
+					local amp, freq, phase = rng:NextNumber(2, 4), rng:NextNumber(0.08, 0.18), rng:NextNumber(0, 6.28)
+					local w = f.Width or 3
+					for i = region.I0, region.I1 do
+						local c = baseJ + math.floor(amp * math.sin(i * freq + phase) + 0.5)
+						for j = c - math.floor((w - 1) / 2), c + math.ceil((w - 1) / 2) do
+							table.insert(cells, { i, j })
+						end
+					end
+				elseif f.Type == "Pond" or f.Type == "Meadow" then
+					local r = rng:NextInteger(f.Radius[1], f.Radius[2])
+					if spanI > 2 * r + 4 and spanJ > 2 * r + 6 then
+						local ci = rng:NextInteger(region.I0 + r + 2, region.I1 - r - 2)
+						local cj = rng:NextInteger(region.J0 + r + 3, region.J1 - r - 3)
+						cells = blob(ci, cj, r)
+					end
+				elseif f.Type == "Ring" then
+					-- Круг из растений, без своей земли
+					local r = f.Radius or 3
+					if spanI > 2 * r + 4 and spanJ > 2 * r + 6 then
+						local cu = (rng:NextInteger(region.I0 + r + 2, region.I1 - r - 2) + 0.5) * B
+						local cv = (rng:NextInteger(region.J0 + r + 3, region.J1 - r - 3) + 0.5) * B
+						local n = math.floor(r * 4)
+						for k = 1, n do
+							local a = k / n * math.pi * 2
+							PLANTS[f.Plant](plantsHere, cu + math.cos(a) * r * B, floorTop, cv + math.sin(a) * r * B)
+						end
+					end
+				end
+				local mine = {}
+				for _, c in ipairs(cells) do
+					if mark(c[1], c[2], main) then
+						mine[key(c[1], c[2])] = true
+					end
+				end
+				if rim then
+					for _, c in ipairs(cells) do
+						if mine[key(c[1], c[2])] then
+							for _, n in ipairs(NEIGHBORS) do
+								mark(c[1] + n[1], c[2] + n[2], rim)
+							end
+						end
+					end
+				end
+			end
+		end
+		-- Земля особенностей: клетки одного вида склеиваются по рядам
+		local runs = 0
+		for j = region.J0, region.J1 do
+			local i = region.I0
+			while i <= region.I1 do
+				local spec = patchOf[key(i, j)]
+				if spec and spec.Kind then
+					local last = i
+					while last + 1 <= region.I1 do
+						local nextSpec = patchOf[key(last + 1, j)]
+						if not nextSpec or nextSpec.Kind ~= spec.Kind then
+							break
+						end
+						last += 1
+					end
+					local len = last - i + 1
+					local part = decor(box(featureFolder, spec.Kind, (i + len / 2) * B, floorTop, (j + 0.5) * B, len * B, 0.1, B, TOP_ONLY))
+					runs += 1
+					if spec.Glow and runs % 6 == 0 then
+						glow(part, 16, 1)
+					end
+					i = last + 1
+				else
+					i += 1
+				end
+			end
+		end
 	end
 
 	-- Пятна: каждое — случайное «пятно» из клеток, склеенное по рядам
-	local patchOf = {} -- [key] = вид пятна
 	local cellsTotal = (region.I1 - region.I0 + 1) * (region.J1 - region.J0 + 1)
 	if theme.Patches and theme.PatchDensity and theme.PatchDensity > 0 then
 		local patchFolder = folderOf(region.Name, "Patches")
@@ -1368,16 +2180,30 @@ if CLOUDS > 0 and minI <= maxI then
 end
 
 ---------------------------------------------------------------- НЕВИДИМАЯ СТЕНА
--- По двум внешним рядам холмов (толщина 8: на большой скорости тонкие стены пролетают).
--- Клетки склеиваются в большие прямоугольники, чтобы деталей было мало.
+-- По двум внешним рядам холмов — тем, за которыми пустота (толщина 8: на большой
+-- скорости тонкие стены пролетают). Клетки склеиваются в большие прямоугольники.
 do
 	local barrierFolder = folderOf("Sky", "Barrier")
 	local isWall = {}
+	local function isOutside(i, j)
+		local k = key(i, j)
+		return not hills[k] and not interior[k]
+	end
 	for j = minJ, maxJ do
 		for i = minI, maxI do
 			local cell = hills[key(i, j)]
-			if cell and cell.R >= cell.Rows - 1 then
-				isWall[key(i, j)] = cell
+			if cell then
+				local nearOutside = false
+				for di = -2, 2 do
+					for dj = -2, 2 do
+						if isOutside(i + di, j + dj) then
+							nearOutside = true
+						end
+					end
+				end
+				if nearOutside then
+					isWall[key(i, j)] = cell
+				end
 			end
 		end
 	end
@@ -1390,11 +2216,11 @@ do
 		for i = minI, maxI do
 			if free(i, j) then
 				local w = 1
-				while free(i + w, j) do
+				while w < 500 and free(i + w, j) do
 					w += 1
 				end
 				local h = 1
-				while true do
+				while h < 500 do
 					local ok = true
 					for ii = i, i + w - 1 do
 						if not free(ii, j + h) then
@@ -1441,8 +2267,12 @@ for _, region in ipairs(regions) do
 end
 print(string.format("[BlockWorld] Готово: участков %d, биомы по порядку: %s (в сторону %s).",
 	plotCount, #names > 0 and table.concat(names, " -> ") or "нет", exitName))
-print(string.format("[BlockWorld] Деревьев %d, фонарей %d, подсветок %d из %d, деталей всего %d.",
-	treeCount, lanternCount, lightsUsed, MAX_LIGHTS, partCount))
+if #createdBiomes > 0 then
+	print("[BlockWorld] Биомы, построенные скриптом: " .. table.concat(createdBiomes, ", ")
+		.. ". Если своей модели босса в биоме нет — игра ставит временного из кубиков.")
+end
+print(string.format("[BlockWorld] Деревьев %d, фонарей %d, построек %d, подсветок %d из %d, деталей всего %d.",
+	treeCount, lanternCount, landmarkCount, lightsUsed, MAX_LIGHTS, partCount))
 if #missingThemes > 0 then
 	warn("[BlockWorld] Нет стиля для биомов: " .. table.concat(missingThemes, ", ")
 		.. " — взят стиль Plains. Имена стилей: Plains, Forest, Desert, Snow, Swamp, Underworld, CrystalCave.")
