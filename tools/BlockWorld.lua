@@ -37,12 +37,30 @@ local MAX_LIGHTS = 60      -- сколько всего светящихся п�
 local EXIT = "auto"        -- куда от спавна идут биомы: "auto", "+X", "-X", "+Z", "-Z"
 local SEED = 7             -- поменяй число, чтобы холмы и предметы встали по-другому
 
+-- Производительность
+local USE_MATERIALS = true -- картинки блоков — материалом детали (MaterialVariant в MaterialService),
+                           -- а не объектами Texture. Texture рисуется отдельно на каждой грани каждой
+                           -- детали, тысячи таких — главный источник лагов. false — старый способ.
+local PLANT_DENSITY = 0.6  -- множитель травы, цветов и прочей мелочи (1 — как было; меньше — меньше деталей)
+local STREAMING_LOD = true -- холмы, деревья и постройки видны издалека упрощённой моделью, даже если
+                           -- сами детали ещё не загрузились (работает при Workspace.StreamingEnabled)
+
 -- Спавн
 local SPAWN_MARGIN = 12    -- свободное место между участками (на максимуме) и холмами, студы
 local SPAWN_ROWS = 8       -- глубина холмов спавна в блоках
 local LANTERN_EVERY = 7    -- фонарь на краю холма через каждые N блоков (0 — без фонарей)
 local PATH_WIDTH = 2       -- ширина тропинок от участков к площадке и к выходу, в блоках (0 — без них)
 local PLAZA_RADIUS = 4     -- радиус площадки посреди спавна, где сходятся тропинки (в блоках)
+
+-- Граница safe zone и первого биома: красная линия по краю Workspace.SafeZone и надпись на земле
+local SAFE_LINE = true                   -- false — без линии и надписи
+local SAFE_LINE_WIDTH = 1.5              -- ширина линии, студы
+local SAFE_LINE_COLOR = Color3.fromRGB(230, 35, 35)
+local SAFE_SIGN_IMAGE = 125040199987845  -- Id картинки "Safe Zone" (0 — без надписи)
+local SAFE_SIGN_SIZE = Vector2.new(48, 24) -- место под картинку на земле: ширина вдоль линии и глубина, студы.
+                                           -- Картинка вписывается в него без растяжения.
+local SAFE_SIGN_GAP = 2                  -- отступ надписи от линии внутрь safe zone, студы
+local SAFE_SIGN_FLIP = false             -- надпись вверх ногами для идущих из Plains — поставь true
 
 -- Биомы
 local BIOME_ROWS = 7       -- глубина холмов по бокам биома в блоках
@@ -281,6 +299,28 @@ do
 	end
 end
 
+-- Материал на каждую картинку: MaterialVariant "Block<Имя>" в MaterialService.
+-- Картинка ложится на все грани детали, цвет детали её подкрашивает (Tint).
+local MaterialService = game:GetService("MaterialService")
+local MATERIAL_BASE = Enum.Material.Plastic
+local variantOf = {} -- [имя картинки] = имя MaterialVariant
+if USE_MATERIALS then
+	for name, id in pairs(TEXTURES) do
+		local variantName = "Block" .. name
+		local variant = MaterialService:FindFirstChild(variantName)
+		if not (variant and variant:IsA("MaterialVariant")) then
+			variant = Instance.new("MaterialVariant")
+			variant.Name = variantName
+		end
+		variant.BaseMaterial = MATERIAL_BASE
+		variant.ColorMap = "rbxassetid://" .. id
+		variant.StudsPerTile = B -- одна плитка картинки = один блок
+		variant.MaterialPattern = Enum.MaterialPattern.Regular
+		variant.Parent = MaterialService
+		variantOf[name] = variantName
+	end
+end
+
 -- Деталь из модели или сама деталь
 local function resolvePart(holder)
 	if not holder then
@@ -347,6 +387,13 @@ local function rollChances(chances)
 		end
 	end
 	return nil
+end
+-- То же для травы и цветов, но реже в PLANT_DENSITY раз
+local function rollPlant(chances)
+	if PLANT_DENSITY < 1 and rng:NextNumber() >= PLANT_DENSITY then
+		return nil
+	end
+	return rollChances(chances)
 end
 
 ---------------------------------------------------------------- ГДЕ УЧАСТКИ И БИОМЫ
@@ -515,6 +562,8 @@ ChangeHistoryService:SetWaypoint("Before WorldDecor")
 local root = Instance.new("Model")
 root.Name = "WorldDecor"
 local folders = {}
+-- Большое и видное издалека — в модель с упрощённой копией для дальней дистанции
+local LOD_GROUPS = { Hills = true, Trees = true, Landmark = true, Lanterns = true }
 local function folderOf(regionName, name)
 	local k = regionName .. "/" .. name
 	if not folders[k] then
@@ -525,7 +574,15 @@ local function folderOf(regionName, name)
 			parent.Parent = root
 			folders[regionName] = parent
 		end
-		local f = Instance.new("Folder")
+		local f
+		if STREAMING_LOD and LOD_GROUPS[name] then
+			f = Instance.new("Model")
+			pcall(function()
+				f.LevelOfDetail = Enum.ModelLevelOfDetail.StreamingMesh
+			end)
+		else
+			f = Instance.new("Folder")
+		end
 		f.Name = name
 		f.Parent = parent
 		folders[k] = f
@@ -546,7 +603,11 @@ end
 
 -- Картинка вида kind на одну грань детали.
 -- Одна плитка текстуры = один блок, поэтому склеенные блоки всё равно видны по отдельности.
+local textureCount = 0
 local function applyTexture(p, kind, face)
+	if USE_MATERIALS then
+		return -- картинка уже в материале детали
+	end
 	local info = KINDS[kind]
 	local id = info.Texture and TEXTURES[info.Texture]
 	if not id then
@@ -560,6 +621,7 @@ local function applyTexture(p, kind, face)
 	t.Color3 = info.Tint or Color3.new(1, 1, 1)
 	t.Transparency = info.Transparency or 0
 	t.Parent = p
+	textureCount += 1
 end
 
 -- faces — на какие грани класть картинку (по умолчанию все, кроме низа).
@@ -573,6 +635,13 @@ local function block(parent, name, kind, size, cframe, faces)
 	p.CFrame = cframe
 	p.Color = info.Colors[rng:NextInteger(1, #info.Colors)]
 	p.Material = info.Material or Enum.Material.SmoothPlastic
+	local variant = USE_MATERIALS and info.Texture and variantOf[info.Texture]
+	if variant then
+		-- Цвет детали умножается на картинку, как раньше Color3 у Texture
+		p.Material = MATERIAL_BASE
+		p.MaterialVariant = variant
+		p.Color = info.Tint or Color3.new(1, 1, 1)
+	end
 	p.Transparency = info.Transparency or 0
 	p.Reflectance = info.Reflectance or 0
 	p.TopSurface = Enum.SurfaceType.Smooth
@@ -1138,22 +1207,22 @@ local spawnRegion = {
 	IsSpawn = true,
 }
 
--- Пол биома: несколько лучей сверху вниз, берём средний результат
+-- Пол биома: сетка лучей сверху вниз, берём высоту, на которую попало больше всего лучей
+-- (пол — самая частая поверхность, а предметы на нём у каждого луча свои).
+-- Как в игре (WorldService), полом не считается то, сквозь что игрок проходит:
+-- детали без столкновений и невидимые (зоны, хитбоксы).
 local function findFloor(model, areaPart, areaCf, areaSize)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.RespectCanCollide = true
 	local ignore = {}
 	if areaPart then
 		table.insert(ignore, areaPart)
 	end
-	for _, name in ipairs({ "Gate", "EggSpawns", "BossSpawn" }) do
-		local found = model:FindFirstChild(name, true)
-		if found then
-			table.insert(ignore, found)
-		end
-	end
 	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("Humanoid") and d.Parent then
+		if d.Name == "Area" or d.Name == "Gate" or d.Name == "EggSpawns" or d.Name == "BossSpawn" then
+			table.insert(ignore, d)
+		elseif d:IsA("Humanoid") and d.Parent then
 			table.insert(ignore, d.Parent)
 		end
 	end
@@ -1163,20 +1232,37 @@ local function findFloor(model, areaPart, areaCf, areaSize)
 		end
 	end
 	params.FilterDescendantsInstances = ignore
-	local hits = {}
 	local top = areaCf.Position.Y + areaSize.Y / 2 + 50
-	for _, offset in ipairs({ { 0, 0 }, { 0.25, 0.25 }, { -0.25, 0.25 }, { 0.25, -0.25 }, { -0.25, -0.25 } }) do
-		local p = areaCf:PointToWorldSpace(Vector3.new(offset[1] * areaSize.X, 0, offset[2] * areaSize.Z))
-		local result = workspace:Raycast(Vector3.new(p.X, top, p.Z), Vector3.new(0, -(areaSize.Y + 400), 0), params)
-		if result then
-			table.insert(hits, result.Position.Y)
+	local down = Vector3.new(0, -(areaSize.Y + 400), 0)
+	local function cast(origin)
+		-- Невидимые детали со столкновениями (стены-хитбоксы) пропускаем и пускаем луч дальше
+		for _ = 1, 20 do
+			local result = workspace:Raycast(origin, down, params)
+			if not result or result.Instance.Transparency < 0.95 then
+				return result
+			end
+			params:AddToFilter(result.Instance)
+		end
+		return nil
+	end
+	local count = {} -- [высота] = сколько лучей в неё попало
+	for a = -2, 2 do
+		for b = -2, 2 do
+			local p = areaCf:PointToWorldSpace(Vector3.new(a * 0.18 * areaSize.X, 0, b * 0.18 * areaSize.Z))
+			local result = cast(Vector3.new(p.X, top, p.Z))
+			if result then
+				local y = math.floor(result.Position.Y * 10 + 0.5) / 10
+				count[y] = (count[y] or 0) + 1
+			end
 		end
 	end
-	if #hits == 0 then
-		return areaCf.Position.Y - areaSize.Y / 2
+	local best
+	for y, n in pairs(count) do
+		if not best or n > count[best] or (n == count[best] and y < best) then
+			best = y
+		end
 	end
-	table.sort(hits)
-	return hits[math.ceil(#hits / 2)]
+	return best or areaCf.Position.Y - areaSize.Y / 2
 end
 
 ---------------------------------------------------------------- НОВЫЕ БИОМЫ
@@ -1310,6 +1396,7 @@ if CREATE_BIOMES then
 				local model = Instance.new("Model")
 				model.Name = name
 				model:SetAttribute("AutoBiome", true)
+				model:SetAttribute("FloorY", tFloor) -- верх пола: его не надо искать лучами
 
 				marker(model, "Area", Vector3.new(width, areaH, length), at(cu, tFloor + areaMidY, cv))
 
@@ -1414,7 +1501,7 @@ for _, model in ipairs(biomeModels) do
 		ThemeName = themeName,
 		I0 = roundCell(u0), I1 = roundCell(u1) - 1,
 		J0 = roundCell(v0), J1 = roundCell(v1) - 1,
-		Y = findFloor(model, areaPart, cf, size),
+		Y = model:GetAttribute("AutoBiome") and model:GetAttribute("FloorY") or findFloor(model, areaPart, cf, size),
 		Rows = BIOME_ROWS,
 	}
 	if region.I1 >= region.I0 and region.J1 >= region.J0 then
@@ -1625,8 +1712,13 @@ end
 -- а до верха самого низкого соседа — ниже его всё равно закрывают соседи.
 -- Сзади холмов (за краем карты) — только верхний блок. Картинки — только на видимых
 -- гранях, а трава сверху — картинкой на верхней грани, без отдельной детали.
--- Отдельный тонкий слой сверху ставится, только если у верхнего блока нет картинки.
+-- Отдельный тонкий слой сверху ставится, только если у верхнего блока нет картинки
+-- (с USE_MATERIALS — если верх из другого блока, чем слой под ним).
 local function hasCap(theme)
+	if USE_MATERIALS then
+		-- Материал один на всю деталь: другой верх (трава на земле) — тонкой деталью сверху
+		return theme.Top ~= theme.Fill
+	end
 	return not hasTexture(theme.Top)
 end
 
@@ -1697,7 +1789,7 @@ for j = minJ, maxJ do
 				at(u, (top + fillBottom) / 2, v), faces)
 			if hasCap(theme) then
 				block(parent, theme.Top, theme.Top, Vector3.new(sizeU, CAP, B), at(u, top + CAP / 2, v), TOP_ONLY)
-			else
+			elseif not USE_MATERIALS then
 				applyTexture(fill, theme.Top, Enum.NormalId.Top)
 				fill.Color = KINDS[theme.Top].Colors[1]
 			end
@@ -1789,7 +1881,7 @@ for j = minJ, maxJ do
 					PROPS[prop]({ Parent = folderOf(cell.Region.Name, "Props"), U = u, V = v, Y = y, Inward = cell.Inward, Theme = theme })
 					blocked[k] = true
 				else
-					local plant = rollChances(theme.HillPlants)
+					local plant = rollPlant(theme.HillPlants)
 					if plant then
 						PLANTS[plant](folderOf(cell.Region.Name, "Plants"), u + rng:NextNumber(-1.2, 1.2), y, v + rng:NextNumber(-1.2, 1.2))
 					end
@@ -1897,6 +1989,120 @@ do
 		zone.CFrame = at((u0 + u1) / 2, s.Y + 30, (v0 + v1) / 2)
 		zone.Parent = workspace
 		print("[BlockWorld] SafeZone не было — сделал невидимую на весь спавн.")
+	end
+end
+
+---------------------------------------------------------------- ГРАНИЦА SAFE ZONE
+-- Красная линия по краю SafeZone со стороны первого биома (там, где игра и правда
+-- перестаёт считать игрока в безопасности) и картинка "Safe Zone" на земле перед ней.
+-- Линия идёт по ширине первого биома: по бокам всё равно холмы.
+if SAFE_LINE and regions[1] then
+	local first = regions[1]
+	local zone = workspace:FindFirstChild("SafeZone")
+	local zoneParts = {}
+	if zone and zone:IsA("BasePart") then
+		table.insert(zoneParts, zone)
+	elseif zone then
+		for _, d in ipairs(zone:GetDescendants()) do
+			if d:IsA("BasePart") and d.Name == "Area" then
+				table.insert(zoneParts, d)
+			end
+		end
+		if #zoneParts == 0 then
+			table.insert(zoneParts, zone) -- модель без деталей Area: по габариту всей модели
+		end
+	end
+
+	-- Край зоны, ближайший к биому: из деталей, что напротив входа в биом, — самый дальний от спавна
+	local pu0, pu1 = first.I0 * B, (first.I1 + 1) * B
+	local borderV, lu0, lu1, facing
+	for _, part in ipairs(zoneParts) do
+		local u0, u1, _, v1 = rectOf(part)
+		local overlaps = u1 > pu0 and u0 < pu1
+		if not borderV or (overlaps and not facing) or (overlaps == facing and v1 > borderV) then
+			borderV, facing = v1, overlaps
+			lu0, lu1 = overlaps and math.max(u0, pu0) or u0, overlaps and math.min(u1, pu1) or u1
+		end
+	end
+
+	if borderV and lu1 - lu0 >= 1 then
+		-- Высота пола у линии: лучом вниз, мимо ворот, зон и всего, сквозь что проходят
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.RespectCanCollide = true
+		local ignore = {}
+		for _, d in ipairs(biomesFolder and biomesFolder:GetDescendants() or {}) do
+			if d.Name == "Gate" or d.Name == "Area" then
+				table.insert(ignore, d)
+			end
+		end
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player.Character then
+				table.insert(ignore, player.Character)
+			end
+		end
+		params.FilterDescendantsInstances = ignore
+		local function floorAt(u)
+			local origin = at(u, first.Y + 200, borderV).Position
+			for _ = 1, 20 do
+				local result = workspace:Raycast(origin, Vector3.new(0, -400, 0), params)
+				if not result then
+					return first.Y
+				end
+				if result.Instance.Transparency < 0.95 then
+					return result.Position.Y
+				end
+				params:AddToFilter(result.Instance)
+			end
+			return first.Y
+		end
+		local cu = (lu0 + lu1) / 2
+		local samples = { floorAt(lu0 + 2), floorAt(cu), floorAt(lu1 - 2) }
+		table.sort(samples)
+		-- Чуть выше земли биома и тропинок декора (они до +0.3 над полом), чтобы не мерцать
+		local y = samples[2] + 0.3
+		local parent = folderOf("Spawn", "SafeBorder")
+
+		local line = Instance.new("Part")
+		line.Name = "SafeZoneLine"
+		line.Anchored = true
+		line.Size = Vector3.new(lu1 - lu0, 0.1, SAFE_LINE_WIDTH)
+		line.CFrame = at(cu, y + 0.05, borderV)
+		line.Color = SAFE_LINE_COLOR
+		line.Material = Enum.Material.Neon
+		decor(line).Parent = parent
+		partCount += 1
+
+		local imageId = textureId(SAFE_SIGN_IMAGE)
+		if imageId then
+			local w = math.min(SAFE_SIGN_SIZE.X, lu1 - lu0)
+			local d = SAFE_SIGN_SIZE.Y
+			local sign = Instance.new("Part")
+			sign.Name = "SafeZoneSign"
+			sign.Anchored = true
+			sign.Transparency = 1
+			sign.Size = Vector3.new(w, 0.05, d)
+			sign.CFrame = at(cu, y + 0.025, borderV - SAFE_LINE_WIDTH / 2 - SAFE_SIGN_GAP - d / 2)
+				* CFrame.Angles(0, SAFE_SIGN_FLIP and math.pi or 0, 0)
+			decor(sign).Parent = parent
+			partCount += 1
+
+			local gui = Instance.new("SurfaceGui")
+			gui.Face = Enum.NormalId.Top
+			gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+			gui.PixelsPerStud = 20
+			gui.LightInfluence = 1 -- как краска на земле: ночью темнеет вместе с миром
+			gui.Parent = sign
+			local image = Instance.new("ImageLabel")
+			image.Size = UDim2.fromScale(1, 1)
+			image.BackgroundTransparency = 1
+			image.Image = "rbxassetid://" .. imageId
+			image.ScaleType = Enum.ScaleType.Fit
+			image.Parent = gui
+		end
+		print(string.format("[BlockWorld] Граница safe zone: линия %d студов у входа в %s.", math.floor(lu1 - lu0 + 0.5), first.Name))
+	else
+		warn("[BlockWorld] Не нашёл край Workspace.SafeZone напротив " .. first.Name .. " — линию границы не к чему привязать.")
 	end
 end
 
@@ -2143,7 +2349,7 @@ for _, region in ipairs(regions) do
 					end
 				end
 				if not placedProp then
-					local plant = rollChances(spec and spec.Plants or (not spec and theme.Plants) or nil)
+					local plant = rollPlant(spec and spec.Plants or (not spec and theme.Plants) or nil)
 					if plant then
 						PLANTS[plant](plantFolder, u + rng:NextNumber(-1.2, 1.2), floorTop + (spec and 0.1 or 0), v + rng:NextNumber(-1.2, 1.2))
 					end
@@ -2267,12 +2473,40 @@ for _, region in ipairs(regions) do
 end
 print(string.format("[BlockWorld] Готово: участков %d, биомы по порядку: %s (в сторону %s).",
 	plotCount, #names > 0 and table.concat(names, " -> ") or "нет", exitName))
+
+-- Высота пола каждого биома: если какой-то сильно выше или ниже — он висит в воздухе
+-- или утоплен, значит лучи нашли не тот пол (или модель биома стоит на другой высоте)
+local heights = { string.format("низ участков %.1f", groundY) }
+local uneven = {}
+for _, region in ipairs(regions) do
+	table.insert(heights, string.format("%s %.1f", region.Name, region.Y))
+	if math.abs(region.Y - regions[1].Y) > 1 then
+		table.insert(uneven, region.Name)
+	end
+end
+print("[BlockWorld] Высота пола: " .. table.concat(heights, ", "))
+if #uneven > 0 then
+	warn("[BlockWorld] Пол не на уровне " .. regions[1].Name .. " у: " .. table.concat(uneven, ", ")
+		.. ". Если это не задумано — проверь, что внутри Area этих биомов нет лишних деталей над полом"
+		.. " и что сама модель биома стоит на той же высоте.")
+end
 if #createdBiomes > 0 then
 	print("[BlockWorld] Биомы, построенные скриптом: " .. table.concat(createdBiomes, ", ")
 		.. ". Если своей модели босса в биоме нет — игра ставит временного из кубиков.")
 end
-print(string.format("[BlockWorld] Деревьев %d, фонарей %d, построек %d, подсветок %d из %d, деталей всего %d.",
-	treeCount, lanternCount, landmarkCount, lightsUsed, MAX_LIGHTS, partCount))
+print(string.format("[BlockWorld] Деревьев %d, фонарей %d, построек %d, подсветок %d из %d, деталей всего %d, картинок Texture %d.",
+	treeCount, lanternCount, landmarkCount, lightsUsed, MAX_LIGHTS, partCount, textureCount))
+
+-- Настройки места, от которых сильно зависит скорость
+local okTech, technology = pcall(function()
+	return game:GetService("Lighting").Technology
+end)
+if okTech and technology == Enum.Technology.Future then
+	warn("[BlockWorld] Lighting.Technology = Future — самое тяжёлое освещение. Для такой карты лучше ShadowMap.")
+end
+if STREAMING_LOD and not workspace.StreamingEnabled then
+	print("[BlockWorld] Workspace.StreamingEnabled выключен — дальние упрощённые модели (STREAMING_LOD) не работают.")
+end
 if #missingThemes > 0 then
 	warn("[BlockWorld] Нет стиля для биомов: " .. table.concat(missingThemes, ", ")
 		.. " — взят стиль Plains. Имена стилей: Plains, Forest, Desert, Snow, Swamp, Underworld, CrystalCave.")

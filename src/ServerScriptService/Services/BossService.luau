@@ -242,6 +242,10 @@ end
 
 -- boss.Tracks[key] = список дорожек: в одной папке может быть несколько анимаций
 local function loadAnimations(boss)
+	if not boss or not boss.Humanoid then
+		return
+	end
+
 	boss.Tracks = {}
 	boss.PlayingKey = nil
 	boss.PlayingTrack = nil
@@ -333,6 +337,10 @@ end
 
 -- Ищет модель босса. Возвращает модель и true, если она стоит прямо в биоме.
 local function findBossModel(biome)
+	if not biome or not biome.Model then
+		return nil, false
+	end
+
 	local name = biome.Config.Boss.ModelName or "Boss"
 	for _, candidate in ipairs({ name, "Boss" }) do
 		local found = biome.Model:FindFirstChild(candidate, true)
@@ -476,8 +484,13 @@ end
 -- Привязывает запись босса к модели (при запуске и после пересоздания)
 local function bind(boss, model)
 	boss.Model = model
-	boss.Root = model:FindFirstChild("HumanoidRootPart")
-	boss.Humanoid = model:FindFirstChildOfClass("Humanoid")
+	boss.Root = model and model:FindFirstChild("HumanoidRootPart")
+	boss.Humanoid = model and model:FindFirstChildOfClass("Humanoid")
+	if not boss.Root or not boss.Humanoid then
+		warn("[BossService] Не удалось привязать босса к модели: нет HumanoidRootPart или Humanoid.")
+		return false
+	end
+
 	local gui = boss.Root:FindFirstChild("BossLabel")
 	boss.Status = gui and gui:FindFirstChild("Status")
 
@@ -492,6 +505,7 @@ local function bind(boss, model)
 		humanoid:SetStateEnabled(state, false)
 	end
 	loadAnimations(boss)
+	return true
 end
 
 ---------------------------------------------------------------------
@@ -811,6 +825,12 @@ end
 ---------------------------------------------------------------------
 
 local function setupBoss(biome)
+	if not biome or not biome.Model then
+		warn("[BossService] Биом без модели в Workspace: пропускаю босса."
+			.. " Нужна папка Workspace.Biomes.<Id> с моделью и Area.")
+		return
+	end
+
 	local config = biome.Config.Boss
 	local name = config.DisplayName or config.ModelName or "Boss"
 
@@ -855,7 +875,10 @@ local function setupBoss(biome)
 		warn("[BossService] Модель босса " .. name .. " нельзя копировать (Archivable = false)."
 			.. " Если босс пропадёт, он не появится снова.")
 	end
-	bind(boss, model)
+	if not bind(boss, model) then
+		model:Destroy()
+		return
+	end
 	sleep(boss)
 	table.insert(bosses, boss)
 end
