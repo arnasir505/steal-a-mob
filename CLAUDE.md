@@ -66,7 +66,7 @@ Galactic–Immortal. С каждым биомом растут MaxWeight яиц,
 где стоит в Studio, там и спит. Либо `ReplicatedStorage.Assets.Bosses.<ModelName>`
 плюс деталь-метка `BossSpawn` в биоме. Нет модели — встроенная блочная модель из `BossModels`
 (все 7 боссов: риг из блоков с Motor6D, атрибут `BossRig`), а если имени там нет — временный босс из кубиков.
-Встроенные модели анимирует клиент кодом (`BossFx.client.luau`): сон сидя с «Z», рык, бег у каждого свой,
+Встроенные модели анимирует клиент кодом (`BossFx.client.luau`): сон стоя с «Z», рык, бег у каждого свой,
 удар с замахом, перенос яйца; частицы-блоки, волны, тряска камеры у пойманного. Состояние — атрибут
 модели `BossState` (`setState` в BossService), разовые события — `Remotes.Event("BossFx")` ("Wake", "Hit").
 Звуки каждого босса — `Boss<ModelName>Wake/Hit/Step/Snore` в `Config/Sounds` (пока Id = 0 — `Fallback` с другим `Pitch`).

@@ -2,7 +2,7 @@
 --
 -- Модели из BossModels (атрибут BossRig) двигаются кодом: каждый кадр клиент
 -- поворачивает суставы Motor6D по состоянию босса (атрибут BossState от сервера):
---   Sleep  — сидит на земле, клюёт носом, над головой «Z»
+--   Sleep  — дремлет стоя, голова свесилась, над головой «Z»
 --   Wake   — вскакивает и рычит (руки вверх, ударная волна)
 --   Chase  — бег, у каждого босса свой (фараон тянет руки вперёд, йети бежит
 --            вразвалку, отшельник горбится, голем топает)
@@ -516,17 +516,17 @@ local function pose(rig, state, now, dt)
 	local legRoll = 0
 
 	if state == "Sleep" then
-		-- Сидит на земле, клюёт носом и дышит
+		-- Дремлет стоя: голова свесилась, руки висят, медленно покачивается и дышит.
+		-- Ноги на месте — так модель не уходит под пол.
 		local breath = math.sin(now * 1.3)
-		rootDown = rig.LegLength * 0.9
-		leftLeg, rightLeg = 1.45, 1.45
-		legRoll = 0.12
-		leftArm, rightArm = 0.55, 0.55
-		leftRoll, rightRoll = -0.1, 0.1
-		lean = -0.25 - style.Hunch - breath * 0.03
-		headPitch = -0.4 + math.sin(now * 0.6) * 0.08
-		bob = breath * 0.05 * px
-		twist = 0
+		leftLeg, rightLeg = 0, 0
+		legRoll = 0.04
+		leftArm, rightArm = 0.12 + breath * 0.03, 0.12 + breath * 0.03
+		leftRoll, rightRoll = -0.06, 0.06
+		lean = -0.12 - style.Hunch - breath * 0.02
+		headPitch = -0.55 + math.sin(now * 0.6) * 0.08
+		bob = breath * 0.15 * px
+		twist = math.sin(now * 0.4) * 0.04
 	elseif state == "Carry" then
 		-- Яйцо над головой: обе руки вверх
 		leftArm, rightArm = 2.9, 2.9
