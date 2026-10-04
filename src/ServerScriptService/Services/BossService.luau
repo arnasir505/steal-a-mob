@@ -24,7 +24,8 @@
 --   2. ReplicatedStorage.Assets.Bosses.Farmer — тогда босс спит на детали
 --      BossSpawn внутри биома (низ босса ставится на её центр),
 --      а если её нет — в центре биома.
---   3. Ничего нет — строится временный босс из кубиков.
+--   3. Встроенная блочная модель из BossModels (анимирует её клиент — BossFx.client.luau).
+--   4. И её нет (новое имя) — строится временный босс из кубиков.
 --
 -- Какой может быть модель:
 --   * обычная модель из деталей — игра сама добавит невидимую HumanoidRootPart
@@ -79,6 +80,12 @@ local DISABLED_STATES = {
 }
 
 local SfxService = require(script.Parent.SfxService)
+local BossModels = require(script.Parent.BossModels)
+local Sounds = require(ReplicatedStorage.Shared.Config.Sounds)
+
+-- Разовые эффекты для клиентов (BossFx.client.luau): "Wake" — рык, "Hit" — удар.
+-- Что босс делает сейчас (сон, бег...), клиент читает из атрибута модели BossState.
+local fxEvent = Remotes.Event("BossFx")
 
 local BossService = {}
 
@@ -275,10 +282,12 @@ local function loadAnimations(boss)
 		end
 	end
 
-	-- Чего нет — берём стандартное
+	-- Чего нет — берём стандартное. Встроенную модель (BossModels) двигает клиент,
+	-- стандартные анимации Roblox ей не подходят.
 	local defaults = {}
+	local procedural = boss.Model:GetAttribute("BossRig") ~= nil
 	for _, key in ipairs(ANIMATION_STATES) do
-		if not boss.Tracks[key] then
+		if not boss.Tracks[key] and not procedural then
 			local track = loadDefaultTrack(boss, key)
 			if track then
 				boss.Tracks[key] = { track }
@@ -345,14 +354,19 @@ local function findBossModel(biome)
 	for _, candidate in ipairs({ name, "Boss" }) do
 		local found = biome.Model:FindFirstChild(candidate, true)
 		if found and found:IsA("Model") then
-			return found, true
+			return found, true, "из модели биома (" .. found:GetFullName() .. ")"
 		end
 	end
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local folder = assets and assets:FindFirstChild("Bosses")
 	local template = folder and folder:FindFirstChild(name)
 	if template and template:IsA("Model") then
-		return template:Clone(), false
+		return template:Clone(), false, "из ReplicatedStorage.Assets.Bosses"
+	end
+	-- Своей модели нет — встроенная блочная модель (BossModels)
+	local built = BossModels.Build(name)
+	if built then
+		return built, false, "встроенная (BossModels)"
 	end
 	return nil, false
 end
@@ -529,6 +543,19 @@ local function setTarget(boss, player)
 	end
 end
 
+-- Состояние босса: в записи и в атрибуте модели (по нему клиент выбирает анимацию)
+local function setState(boss, state)
+	boss.State = state
+	if boss.Model then
+		boss.Model:SetAttribute("BossState", state)
+	end
+end
+
+-- Свой звук босса (BossFarmerWake) или общий (BossWake)
+local function soundOf(boss, what)
+	return Sounds.BossKey(boss.Config.ModelName, what)
+end
+
 local function releaseEgg(boss)
 	if boss.CarriedEgg then
 		EggService.PutBack(boss.CarriedEgg)
@@ -539,7 +566,7 @@ end
 -- Храп спящего босса: звук в его корневой детали (после пересоздания — новый)
 local function snore(boss, on)
 	if not (boss.Snore and boss.Snore.Parent == boss.Root) then
-		boss.Snore = SfxService.Loop(boss.Root, "BossSnore")
+		boss.Snore = SfxService.Loop(boss.Root, soundOf(boss, "Snore"))
 	end
 	if boss.Snore then
 		if on then
@@ -553,7 +580,7 @@ end
 local function sleep(boss)
 	releaseEgg(boss)
 	snore(boss, true)
-	boss.State = "Sleep"
+	setState(boss, "Sleep")
 	setTarget(boss, nil)
 	boss.Humanoid:MoveTo(boss.Root.Position)
 	boss.Root.Anchored = true
@@ -577,8 +604,9 @@ end
 local function wake(boss, now)
 	unfreeze(boss)
 	snore(boss, false)
-	SfxService.PlayAt(boss.Root, "BossWake")
-	boss.State = "Wake"
+	SfxService.PlayAt(boss.Root, soundOf(boss, "Wake"))
+	fxEvent:FireAllClients(boss.Model, "Wake")
+	setState(boss, "Wake")
 	boss.WakeUntil = now + C.WakeUpTime
 	setStatus(boss, "!", ALERT_COLOR)
 	playAnimation(boss, nil)
@@ -586,7 +614,7 @@ end
 
 local function startChase(boss)
 	unfreeze(boss)
-	boss.State = "Chase"
+	setState(boss, "Chase")
 	playAnimation(boss, "Run")
 end
 
@@ -601,7 +629,7 @@ local function returnWalkSpeed(boss)
 end
 
 local function goHome(boss, now)
-	boss.State = "Return"
+	setState(boss, "Return")
 	setTarget(boss, nil)
 	boss.ReturnStartedAt = now
 	boss.Humanoid.WalkSpeed = returnWalkSpeed(boss)
@@ -612,7 +640,7 @@ end
 
 -- Несёт отобранное яйцо над головой к месту, где оно появилось
 local function startCarry(boss, egg, now)
-	boss.State = "Carry"
+	setState(boss, "Carry")
 	setTarget(boss, nil)
 	boss.CarriedEgg = egg
 	boss.CarryStartedAt = now
@@ -723,6 +751,8 @@ local function catch(boss, player, root, now)
 
 	-- Сначала роняем, потом толкаем: так игрок улетает уже обмякшим
 	SfxService.PlayAt(root, "Caught")
+	SfxService.PlayAt(boss.Root, soundOf(boss, "Hit"))
+	fxEvent:FireAllClients(boss.Model, "Hit", player)
 	RagdollService.Ragdoll(player, C.RagdollTime)
 	SpeedService.Knockback(player, boss.Root.Position, boss.Config.Knockback or 60)
 	if takenEgg then
@@ -767,7 +797,7 @@ local function update(boss, now)
 		if target and C.CarryInterruptible then
 			-- Кто-то крадёт другое яйцо: ставит это на место сразу и в погоню
 			releaseEgg(boss)
-			boss.State = "Return"
+			setState(boss, "Return")
 		else
 			walkWithEgg(boss, now)
 			return
@@ -834,12 +864,14 @@ local function setupBoss(biome)
 	local config = biome.Config.Boss
 	local name = config.DisplayName or config.ModelName or "Boss"
 
-	local model, inBiome = findBossModel(biome)
+	local model, inBiome, source = findBossModel(biome)
 	if not model then
 		model = buildTempBoss(config.ModelName or name)
 		warn("[BossService] Нет модели босса " .. tostring(config.ModelName) .. " для биома " .. biome.Id
 			.. " — построен временный. Положи свою модель в Workspace.Biomes." .. biome.Model.Name
 			.. " (или в ReplicatedStorage.Assets.Bosses)")
+	else
+		print("[BossService] " .. name .. ": модель " .. tostring(source))
 	end
 
 	-- Пока настраиваем, всё заякорено, чтобы ничего не упало

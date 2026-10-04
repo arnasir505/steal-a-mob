@@ -46,7 +46,7 @@ local function musicForZone()
 	local zone = player:GetAttribute("Zone") or ""
 	if zone ~= "" and zone ~= "Safe" then
 		local name = "Music" .. zone
-		if Sounds.List[name] and Sounds.List[name].Id ~= 0 then
+		if Sounds.Resolve(name) then
 			return name
 		end
 	end

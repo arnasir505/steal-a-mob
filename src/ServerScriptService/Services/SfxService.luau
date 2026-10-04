@@ -22,14 +22,15 @@ local playEvent = Remotes.Event("PlaySound")
 local HEAR_DISTANCE = 90 -- на каком расстоянии звук в мире затихает совсем
 
 local function makeSound(name, parent)
-	local config = Sounds.List[name]
-	if not config or config.Id == 0 or not parent then
+	local resolved = Sounds.Resolve(name)
+	if not resolved or not parent then
 		return nil
 	end
 	local sound = Instance.new("Sound")
 	sound.Name = "Sfx_" .. name
-	sound.SoundId = "rbxassetid://" .. config.Id
-	sound.Volume = config.Volume or 0.5
+	sound.SoundId = resolved.SoundId
+	sound.Volume = resolved.Volume
+	sound.PlaybackSpeed = resolved.Pitch
 	sound.RollOffMaxDistance = HEAR_DISTANCE
 	sound.RollOffMinDistance = 10
 	sound.Parent = parent
@@ -57,13 +58,13 @@ function SfxService.Loop(part, name)
 end
 
 function SfxService.PlayFor(player, name)
-	if Sounds.List[name] and Sounds.List[name].Id ~= 0 then
+	if Sounds.Resolve(name) then
 		playEvent:FireClient(player, name)
 	end
 end
 
 function SfxService.PlayForAll(name)
-	if Sounds.List[name] and Sounds.List[name].Id ~= 0 then
+	if Sounds.Resolve(name) then
 		playEvent:FireAllClients(name)
 	end
 end

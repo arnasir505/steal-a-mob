@@ -26,15 +26,16 @@ local function get(name)
 	if cache[name] ~= nil then
 		return cache[name] or nil
 	end
-	local config = Sounds.List[name]
-	if not config or config.Id == 0 then
+	local resolved = Sounds.Resolve(name)
+	if not resolved then
 		cache[name] = false
 		return nil
 	end
 	local sound = Instance.new("Sound")
 	sound.Name = name
-	sound.SoundId = "rbxassetid://" .. config.Id
-	sound.Volume = config.Volume or 0.5
+	sound.SoundId = resolved.SoundId
+	sound.Volume = resolved.Volume
+	sound.PlaybackSpeed = resolved.Pitch
 	sound.Parent = folder
 	cache[name] = sound
 	return sound

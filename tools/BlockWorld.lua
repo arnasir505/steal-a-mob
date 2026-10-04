@@ -4,8 +4,9 @@
 --   Спавн  — холмы из блоков вокруг участков (с запасом под МАКСИМАЛЬНЫЙ рост участков),
 --            деревья, цветы, фонари, тропинка к первому биому.
 --   Биомы  — по бокам каждого биома холмы в его стиле, на них деревья и предметы;
---            внутри — земля в стиле биома, пятна (вода, лава, пашня...), трава и цветы
---            без столкновений, а твёрдые предметы — только у краёв (EDGE_BAND),
+--            внутри — земля в стиле биома, объёмные пятна, речки и озёра (по ним бегут
+--            сверху), трава и цветы, 3D-предметы по всему полу (Inside) — без столкновений,
+--            а твёрдые предметы — только у краёв (EDGE_BAND),
 --            чтобы на большой скорости игрок ни во что не врезался посреди погони.
 --            За последним биомом холмы закрывают конец карты.
 --   Облака и невидимая стена по внешнему краю холмов (толщина 8).
@@ -72,7 +73,14 @@ local CREATE_BIOMES = true -- создать недостающие биомы �
 local BIOME_LENGTH_GROWTH = 1.25 -- каждый следующий биом во столько раз длиннее предыдущего
                                  -- (1 — все как первый). Чем длиннее биом, тем дольше бежать от босса.
 local LANDMARKS = true     -- постройка на склоне у каждого биома (мельница, пирамида, крепость...)
-local FEATURES = true      -- речки, озёра и прочее внутри биомов (без столкновений)
+local FEATURES = true      -- речки, озёра и прочее внутри биомов (объёмные, по ним бегают сверху)
+local FEATURE_HEIGHT = 1.2 -- высота берегов речек и озёр над полом, студы (по ним бегают — не больше 1.5)
+local LIQUID_HEIGHT = 0.9  -- высота воды/лавы/льда: чуть ниже берегов, чтобы было видно русло
+local PATCH_HEIGHT = 0.5   -- высота пятен на полу (пашня, лёд, пепел...) — тоже объёмные, по ним бегают
+local INSIDE = true        -- 3D-предметы по всему биому (деревья, стога, колодцы, кристаллы...)
+                           -- Сквозь них можно пробегать: столкновений нет, только картинка.
+local INSIDE_DENSITY = 0.5 -- сколько таких предметов на 1000 квадратных студов пола
+local INSIDE_GAP = 4       -- самое малое расстояние между ними, в блоках
 local BIOME_ORDER = { "Plains", "Forest", "Desert", "Snow", "Swamp", "Underworld", "CrystalCave" }
 
 ---------------------------------------------------------------- ВИДЫ БЛОКОВ
@@ -110,6 +118,14 @@ local KINDS = {
 	SandBrick = { Texture = "StoneBrick", Tint = rgb(240, 220, 160), Colors = { rgb(205, 186, 130) } },
 	Planks = { Texture = "Log", Tint = rgb(235, 205, 160), Colors = { rgb(160, 120, 70) } },
 	Canvas = { Colors = { rgb(235, 228, 210), rgb(225, 218, 200) } },
+	Cloth = { Colors = { rgb(170, 50, 40), rgb(60, 90, 150), rgb(90, 130, 60) } },
+	Terracotta = { Colors = { rgb(176, 98, 62), rgb(160, 88, 56), rgb(186, 110, 70) } },
+	Gold = { Colors = { rgb(232, 184, 52) }, Material = Enum.Material.Metal },
+	Iron = { Colors = { rgb(120, 124, 132) }, Material = Enum.Material.Metal },
+	PalmLog = { Texture = "Log", Tint = rgb(230, 205, 160), Colors = { rgb(170, 140, 90) } },
+	PalmLeaves = { Texture = "Leaves", Tint = rgb(210, 240, 170), Colors = { rgb(80, 150, 50), rgb(90, 160, 56) } },
+	Cattail = { Colors = { rgb(110, 70, 40) } },
+	SwampGlow = { Colors = { rgb(140, 255, 90) }, Material = NEON },
 	-- Деревья
 	Log = { Texture = "Log", Colors = { rgb(102, 81, 51), rgb(94, 74, 46) } },
 	DeadLog = { Texture = "Log", Tint = rgb(190, 180, 170), Colors = { rgb(110, 96, 80) } },
@@ -161,6 +177,7 @@ local CAP = 0.6 -- толщина верхнего слоя (трава, сне�
 -- Trees/TreeChance — деревья на холмах. HillPlants/HillProps — мелочь и предметы на холмах
 -- (шанс на блок). Patches/PatchDensity — пятна на полу биома. Plants — трава на полу
 -- (шанс на блок, без столкновений). EdgeProps/EdgeChance — твёрдые предметы у краёв биома.
+-- Inside — 3D-предметы по всему полу биома (веса), сквозь них можно пробегать (INSIDE_DENSITY).
 local THEMES = {
 	Spawn = {
 		Top = "GrassTop", Fill = "Dirt", Deep = "Stone", MinHeight = 3, MaxHeight = 12,
@@ -175,6 +192,7 @@ local THEMES = {
 		Patches = { Farmland = 2, Path = 1 }, PatchDensity = 0.05,
 		Plants = { Tuft = 0.06, Flower = 0.03 },
 		EdgeProps = { HayBale = 3, Pumpkin = 2, Fence = 2 }, EdgeChance = 0.06,
+		Inside = { Tree = 4, HayBale = 2, HayPile = 2, Pumpkin = 2, Scarecrow = 2, Well = 1, Cart = 1, Bush = 3, Rock = 1, Fence = 1 },
 	},
 	Forest = {
 		Top = "ForestGrass", Fill = "Dirt", Deep = "Stone", Ground = "ForestGrass", MinHeight = 4, MaxHeight = 12,
@@ -185,6 +203,7 @@ local THEMES = {
 		Plants = { Fern = 0.06, DarkTuft = 0.06, SmallMushroom = 0.015 },
 		EdgeProps = { Tree = 4, Stump = 2, BigMushroom = 1, FallenLog = 1, MossyRock = 1 }, EdgeChance = 0.10,
 		EdgeBand = 3,
+		Inside = { Tree = 8, BigMushroom = 2, FallenLog = 2, Stump = 2, MossyRock = 2, Bush = 3, Boulder = 1 },
 	},
 	Desert = {
 		Top = "Sand", Fill = "Sand", Deep = "Sandstone", FillDepth = 2, Ground = "Sand",
@@ -194,6 +213,7 @@ local THEMES = {
 		Patches = { RedSand = 2, SandstoneFloor = 1 }, PatchDensity = 0.06,
 		Plants = { DeadBush = 0.015 },
 		EdgeProps = { Cactus = 4, Ruin = 1, Fossil = 1 }, EdgeChance = 0.05,
+		Inside = { Cactus = 6, Palm = 2, Urn = 2, Ruin = 2, Obelisk = 1, Fossil = 1, Boulder = 1, Tree = 1 },
 	},
 	Snow = {
 		Top = "Snow", Fill = "Snow", Deep = "Stone", FillDepth = 1, Ground = "Snow", MinHeight = 4, MaxHeight = 14,
@@ -202,6 +222,7 @@ local THEMES = {
 		Patches = { Ice = 1 }, PatchDensity = 0.06,
 		Plants = {},
 		EdgeProps = { Snowman = 1, IceSpike = 2, SnowRock = 2, Tree = 2 }, EdgeChance = 0.05,
+		Inside = { Tree = 5, IceSpike = 2, IceBlock = 2, Snowman = 1, SnowRock = 2, SnowPile = 2 },
 	},
 	Swamp = {
 		Top = "SwampGrass", Fill = "Mud", Deep = "Stone", Ground = "SwampGrass", MinHeight = 2, MaxHeight = 7,
@@ -211,6 +232,7 @@ local THEMES = {
 		Patches = { SwampWater = 3, Mud = 1 }, PatchDensity = 0.14,
 		Plants = { DarkTuft = 0.06, Reed = 0.015, SmallMushroom = 0.01 },
 		EdgeProps = { Tree = 3, FallenLog = 2, Stump = 1 }, EdgeChance = 0.07,
+		Inside = { Tree = 5, FallenLog = 2, Cattails = 3, BigMushroom = 1, Stump = 2, SwampLantern = 1 },
 	},
 	Underworld = {
 		Top = "Hellrock", Fill = "Hellrock", Deep = "Basalt", FillDepth = 4, Ground = "Hellrock",
@@ -220,6 +242,7 @@ local THEMES = {
 		Patches = { Lava = 1, Ash = 2 }, PatchDensity = 0.07,
 		Plants = { Fire = 0.01 },
 		EdgeProps = { ObsidianPillar = 2, GlowRock = 2, Tree = 1 }, EdgeChance = 0.05,
+		Inside = { Tree = 3, BasaltColumn = 3, LavaRock = 2, BonePile = 2, Brazier = 1, ObsidianPillar = 1, GlowRock = 1 },
 	},
 	CrystalCave = {
 		Top = "DarkStone", Fill = "DarkStone", Deep = "Basalt", FillDepth = 4, Ground = "DarkStone",
@@ -229,6 +252,7 @@ local THEMES = {
 		Patches = { CrystalFloor = 1 }, PatchDensity = 0.06,
 		Plants = { SmallCrystal = 0.012 },
 		EdgeProps = { Crystal = 2, Stalagmite = 3 }, EdgeChance = 0.07,
+		Inside = { GiantCrystal = 3, Crystal = 3, Stalagmite = 3, GlowShroom = 3 },
 	},
 }
 
@@ -563,7 +587,7 @@ local root = Instance.new("Model")
 root.Name = "WorldDecor"
 local folders = {}
 -- Большое и видное издалека — в модель с упрощённой копией для дальней дистанции
-local LOD_GROUPS = { Hills = true, Trees = true, Landmark = true, Lanterns = true }
+local LOD_GROUPS = { Hills = true, Trees = true, Landmark = true, Lanterns = true, Inside = true }
 local function folderOf(regionName, name)
 	local k = regionName .. "/" .. name
 	if not folders[k] then
@@ -680,6 +704,19 @@ local function decor(p)
 	p.CanTouch = false
 	p.CastShadow = false
 	return p
+end
+
+-- Модель-«призрак»: видна, но сквозь неё проходят игроки, боссы, камера и лучи
+-- (яйца на неё не встают)
+local function ghost(model)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.CanCollide = false
+			d.CanQuery = false
+			d.CanTouch = false
+		end
+	end
+	return model
 end
 
 -- Подсветка (не больше MAX_LIGHTS на всю карту)
@@ -992,8 +1029,223 @@ PROPS.Tree = function(c)
 	end
 end
 
+---------------------------------------------------------------- 3D-ПРЕДМЕТЫ ВНУТРИ БИОМОВ
+-- Ставятся по всему полу биома (Inside в THEMES) и становятся «призраками» (ghost):
+-- видны, но сквозь них можно пробегать. Размеры — в блоках.
+
+-- Коробка в блоках от точки предмета: du, dv — центр, y — низ, su/sy/sv — размер,
+-- rotation — поворот вокруг центра коробки
+local function ib(c, kind, du, y, dv, su, sy, sv, rotation)
+	local cframe = at(c.U + du * B, c.Y + (y + sy / 2) * B, c.V + dv * B)
+	if rotation then
+		cframe *= rotation
+	end
+	return block(c.Parent, kind, kind, Vector3.new(su * B, sy * B, sv * B), cframe)
+end
+local function yaw(degrees)
+	return CFrame.Angles(0, math.rad(degrees), 0)
+end
+
+-- Сколько клеток вокруг занимает предмет (чтобы не налезал на точки яиц и соседей)
+local INSIDE_FOOTPRINT = {
+	Tree = 3, Palm = 3, Well = 2, Cart = 2, HayPile = 2, BigMushroom = 2, FallenLog = 2,
+	Boulder = 2, GiantCrystal = 2, BasaltColumn = 2, Ruin = 2, Fossil = 2, IceBlock = 2, SnowPile = 2,
+}
+
+-- Стог из тюков сена
+PROPS.HayPile = function(c)
+	for k = -1, 1 do
+		ib(c, "Hay", k, 0, 0, 1, 1, 1)
+	end
+	ib(c, "Hay", -0.5, 1, 0, 1, 1, 1)
+	ib(c, "Hay", 0.5, 1, 0, 1, 1, 1)
+	ib(c, "Hay", 0, 2, 0, 1, 1, 1)
+	ib(c, "Hay", 0.5, 0, 1, 1, 1, 1)
+end
+-- Пугало: шест, рубаха, голова из сена, шляпа и ворона на руке
+PROPS.Scarecrow = function(c)
+	ib(c, "Log", 0, 0, 0, 0.2, 2.6, 0.2)
+	ib(c, "Log", 0, 1.9, 0, 2.2, 0.15, 0.15)
+	ib(c, "Cloth", 0, 1.2, 0, 0.75, 0.95, 0.4)
+	ib(c, "Hay", 0, 2.15, 0, 0.6, 0.6, 0.6)
+	ib(c, "Hay", 0, 2.75, 0, 0.9, 0.08, 0.9)
+	ib(c, "Hay", 0, 2.83, 0, 0.45, 0.3, 0.45)
+	for _, s in ipairs({ -1, 1 }) do
+		ib(c, "Wheat", s * 1.15, 1.8, 0, 0.2, 0.3, 0.2)
+		ib(c, "Coal", s * 0.13, 2.4, -0.31, 0.1, 0.1, 0.02)
+	end
+	ib(c, "Coal", 0.8, 2.05, 0, 0.2, 0.22, 0.35)
+end
+-- Колодец: каменное кольцо с водой, стойки, двускатная крыша, ведро
+PROPS.Well = function(c)
+	for _, p in ipairs({ { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 1 }, { 0, 1 }, { 1, 1 }, { -1, 0 }, { 1, 0 } }) do
+		ib(c, "Stone", p[1], 0, p[2], 1, 1, 1)
+	end
+	ib(c, "Water", 0, 0, 0, 1, 0.8, 1)
+	for _, s in ipairs({ -1, 1 }) do
+		ib(c, "Log", s, 1, 0, 0.25, 1.6, 0.25)
+	end
+	ib(c, "Log", 0, 2.3, 0, 2.2, 0.15, 0.15)
+	ib(c, "Planks", 0, 2.6, -0.6, 3.2, 0.2, 1.4, CFrame.Angles(math.rad(-30), 0, 0))
+	ib(c, "Planks", 0, 2.6, 0.6, 3.2, 0.2, 1.4, CFrame.Angles(math.rad(30), 0, 0))
+	ib(c, "Planks", 0, 1.5, 0, 0.4, 0.4, 0.4)
+end
+-- Телега с сеном
+PROPS.Cart = function(c)
+	local r = yaw(rng:NextInteger(0, 3) * 90)
+	local base = at(c.U, c.Y, c.V) * r
+	local function part(kind, x, y, z, sx, sy, sz, extra)
+		local cframe = base * CFrame.new(x * B, (y + sy / 2) * B, z * B)
+		if extra then
+			cframe *= extra
+		end
+		return block(c.Parent, kind, kind, Vector3.new(sx * B, sy * B, sz * B), cframe)
+	end
+	part("Planks", 0, 0.5, 0, 1.6, 0.5, 2.4)
+	part("Hay", 0, 1, 0, 1.3, 0.5, 2)
+	for _, s in ipairs({ -1, 1 }) do
+		for _, t in ipairs({ -0.7, 0.7 }) do
+			part("Log", s * 0.9, 0, t, 0.2, 1, 1)
+		end
+		part("Log", s * 0.5, 0.55, -2, 0.15, 0.15, 1.8, CFrame.Angles(math.rad(-12), 0, 0))
+	end
+end
+-- Груда камней
+PROPS.Boulder = function(c)
+	local kind = c.Theme.Deep == "Sandstone" and "Sandstone" or "Stone"
+	ib(c, kind, 0, 0, 0, 2, 1.5, 2)
+	ib(c, kind, 0.4, 1.5, -0.2, 1.2, 0.8, 1.2)
+	ib(c, kind, -1.2, 0, 0.6, 1, 0.8, 1)
+	ib(c, kind, 0.9, 0, 1.1, 0.6, 0.5, 0.6)
+end
+-- Пальма: наклонный ствол, листья крестом свисают вниз, кокосы
+PROPS.Palm = function(c)
+	local h = rng:NextInteger(5, 7)
+	local lean = rng:NextNumber() < 0.5 and 1 or -1
+	for k = 0, h - 1 do
+		ib(c, "PalmLog", lean * k * 0.12, k, 0, 0.7, 1, 0.7)
+	end
+	local tu = lean * (h - 1) * 0.12
+	ib(c, "PalmLeaves", tu, h, 0, 1, 0.5, 1)
+	for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+		ib(c, "PalmLeaves", tu + d[1] * 1.3, h - 0.1, d[2] * 1.3, d[1] ~= 0 and 1.6 or 0.8, 0.3, d[2] ~= 0 and 1.6 or 0.8)
+		ib(c, "PalmLeaves", tu + d[1] * 2.3, h - 0.6, d[2] * 2.3, 0.6, 0.6, 0.6)
+	end
+	ib(c, "Log", tu + 0.35, h - 0.45, 0.35, 0.35, 0.35, 0.35)
+	ib(c, "Log", tu - 0.35, h - 0.45, 0.2, 0.35, 0.35, 0.35)
+end
+-- Кувшины с золотым пояском
+PROPS.Urn = function(c)
+	ib(c, "Terracotta", 0, 0, 0, 0.7, 0.2, 0.7)
+	ib(c, "Terracotta", 0, 0.2, 0, 1, 0.7, 1)
+	ib(c, "Terracotta", 0, 0.9, 0, 0.6, 0.3, 0.6)
+	ib(c, "Terracotta", 0, 1.2, 0, 0.8, 0.12, 0.8)
+	ib(c, "Gold", 0, 0.5, 0, 1.04, 0.12, 1.04)
+	if rng:NextNumber() < 0.6 then
+		ib(c, "Terracotta", 0.9, 0, 0.5, 0.6, 0.6, 0.6)
+		ib(c, "Terracotta", 0.9, 0.6, 0.5, 0.35, 0.2, 0.35)
+	end
+end
+-- Обелиск с золотой верхушкой
+PROPS.Obelisk = function(c)
+	ib(c, "SandBrick", 0, 0, 0, 1.6, 0.5, 1.6)
+	ib(c, "Sandstone", 0, 0.5, 0, 1, 5, 1)
+	ib(c, "Sandstone", 0, 5.5, 0, 0.7, 0.5, 0.7)
+	ib(c, "Gold", 0, 6, 0, 0.4, 0.5, 0.4)
+	for _, s in ipairs({ -1, 1 }) do
+		ib(c, "Coal", 0, 1.5, s * 0.51, 0.3, 3, 0.02)
+	end
+end
+-- Ледяные глыбы
+PROPS.IceBlock = function(c)
+	ib(c, "Ice", 0, 0, 0, 1.5, 1.5, 1.5, yaw(rng:NextNumber(0, 45)))
+	ib(c, "Ice", 1.1, 0, 0.4, 1, 1, 1, yaw(rng:NextNumber(0, 45)))
+	ib(c, "Ice", 0.3, 1.5, -0.2, 0.8, 0.8, 0.8, yaw(rng:NextNumber(0, 45)))
+end
+-- Сугроб ступеньками
+PROPS.SnowPile = function(c)
+	ib(c, "Snow", 0, 0, 0, 3, 0.5, 2)
+	ib(c, "Snow", 0.2, 0.5, 0, 2, 0.5, 1.4)
+	ib(c, "Snow", 0.1, 1, 0, 1, 0.4, 0.8)
+end
+-- Рогоз: высокие стебли с коричневыми початками
+PROPS.Cattails = function(c)
+	for _ = 1, rng:NextInteger(5, 9) do
+		local du, dv = rng:NextNumber(-1, 1), rng:NextNumber(-1, 1)
+		local h = rng:NextNumber(1.2, 2.2)
+		ib(c, "Reed", du, 0, dv, 0.1, h, 0.1)
+		ib(c, "Cattail", du, h - 0.1, dv, 0.18, 0.45, 0.18)
+	end
+end
+-- Болотный фонарь: кривой шест и зелёный огонёк
+PROPS.SwampLantern = function(c)
+	ib(c, "SpruceLog", 0, 0, 0, 0.25, 2.5, 0.25)
+	ib(c, "SpruceLog", 0.4, 2.4, 0, 1, 0.15, 0.15)
+	ib(c, "Iron", 0.8, 1.9, 0, 0.45, 0.55, 0.45)
+	glow(ib(c, "SwampGlow", 0.8, 1.95, 0, 0.3, 0.4, 0.3), 14, 1)
+end
+-- Базальтовые столбы разной высоты
+PROPS.BasaltColumn = function(c)
+	for _ = 1, rng:NextInteger(3, 5) do
+		ib(c, "Basalt", rng:NextInteger(-1, 1) * 0.8, 0, rng:NextInteger(-1, 1) * 0.8, 0.8, rng:NextNumber(1.5, 5), 0.8)
+	end
+end
+-- Камень с лавовыми трещинами
+PROPS.LavaRock = function(c)
+	ib(c, "Basalt", 0, 0, 0, 1.6, 1.2, 1.6)
+	ib(c, "Basalt", 0.3, 1.2, 0.2, 0.9, 0.7, 0.9)
+	local crack = ib(c, "Lava", -0.2, 0.2, -0.81, 0.2, 0.9, 0.02)
+	ib(c, "Lava", 0.81, 0.3, 0.1, 0.02, 0.7, 0.2)
+	ib(c, "Lava", -0.3, 1.2, -0.4, 0.6, 0.02, 0.2)
+	glow(crack, 12, 1)
+end
+-- Кости и череп
+PROPS.BonePile = function(c)
+	for _ = 1, 5 do
+		ib(c, "Bone", rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1), 0.15, 0.15, rng:NextNumber(0.8, 1.6), yaw(rng:NextNumber(0, 180)))
+	end
+	ib(c, "Bone", 0.2, 0, 0.1, 0.6, 0.55, 0.6)
+	for _, s in ipairs({ -1, 1 }) do
+		ib(c, "Coal", 0.2 + s * 0.13, 0.25, -0.21, 0.12, 0.12, 0.02)
+	end
+	for k = -1, 1 do
+		ib(c, "Bone", -0.8 + k * 0.35, 0, -0.6, 0.12, 0.9, 0.12, CFrame.Angles(0, 0, math.rad(20)))
+	end
+end
+-- Жаровня с огнём
+PROPS.Brazier = function(c)
+	ib(c, "DarkBrick", 0, 0, 0, 0.5, 1.5, 0.5)
+	ib(c, "Gold", 0, 1.5, 0, 1.2, 0.3, 1.2)
+	ib(c, "DarkBrick", 0, 1.8, 0, 1, 0.3, 1)
+	glow(ib(c, "Fire", 0, 2.1, 0, 0.7, 0.4, 0.7), 18, 1.2)
+	PLANTS.Fire(c.Parent, c.U, c.Y + 2.1 * B, c.V)
+end
+-- Гигантский кристалл с мелкими вокруг
+PROPS.GiantCrystal = function(c)
+	local tilt = CFrame.Angles(math.rad(rng:NextNumber(-12, 12)), 0, math.rad(rng:NextNumber(-12, 12)))
+	glow(ib(c, CRYSTALS[rng:NextInteger(1, #CRYSTALS)], 0, -0.3, 0, 1.4, rng:NextNumber(4, 7), 1.4, tilt), 24, 1.3)
+	for k = 1, 3 do
+		local a = k / 3 * math.pi * 2 + rng:NextNumber(0, 1)
+		ib(c, CRYSTALS[rng:NextInteger(1, #CRYSTALS)], math.cos(a), -0.2, math.sin(a), 0.7, rng:NextNumber(1.5, 3), 0.7,
+			CFrame.Angles(math.sin(a) * 0.5, 0, -math.cos(a) * 0.5))
+	end
+	ib(c, "DarkStone", 0, 0, 0, 2.2, 0.4, 2.2)
+end
+-- Светящийся гриб
+PROPS.GlowShroom = function(c)
+	local h = rng:NextNumber(1.5, 3)
+	local kind = rng:NextNumber() < 0.5 and "CrystalCyan" or "CrystalPurple"
+	ib(c, "MushroomStem", 0, 0, 0, 0.4, h, 0.4)
+	local cap = ib(c, kind, 0, h, 0, 1.8, 0.4, 1.8)
+	ib(c, kind, 0, h + 0.4, 0, 1, 0.3, 1)
+	if rng:NextNumber() < 0.3 then
+		glow(cap, 14, 0.8)
+	end
+end
+
 ---------------------------------------------------------------- ВНУТРИ БИОМОВ: ОСОБЕННОСТИ
--- Всё плоское или без столкновений — бегать не мешает.
+-- Речки и озёра объёмные: берег высотой FEATURE_HEIGHT, вода LIQUID_HEIGHT (чуть ниже).
+-- У них есть столкновения — по ним бегут сверху, а низкие, как ступенька, поэтому не мешают.
 --   River  — речка поперёк биома (Width блоков), по краям берег Bank.
 --   Pond   — озеро радиусом Radius блоков, по краю Rim.
 --   Meadow — поляна: только растения Plants, без своей земли.
@@ -2107,6 +2359,7 @@ if SAFE_LINE and regions[1] then
 end
 
 ---------------------------------------------------------------- ВНУТРИ БИОМОВ
+local insideCount = 0 -- сколько 3D-предметов встало внутри биомов
 for _, region in ipairs(regions) do
 	local theme = region.Theme
 	local model = region.Model
@@ -2186,9 +2439,11 @@ for _, region in ipairs(regions) do
 		local spanI, spanJ = region.I1 - region.I0, region.J1 - region.J0
 		for _, f in ipairs(BIOME_FEATURES[region.ThemeName]) do
 			for _ = 1, f.Count or 1 do
-				local main = { Kind = f.Kind, Plants = f.Plants, Glow = f.Glow }
+				-- Height — верх над полом: вода чуть ниже берегов, видно русло.
+				-- Feature — на этих клетках не ставятся 3D-предметы.
+				local main = { Kind = f.Kind, Plants = f.Plants, Glow = f.Glow, Height = f.Kind and LIQUID_HEIGHT or 0, Feature = true }
 				local edge = f.Rim or f.Bank
-				local rim = edge and { Kind = edge, Plants = f.RimPlants or f.BankPlants } or nil
+				local rim = edge and { Kind = edge, Plants = f.RimPlants or f.BankPlants, Height = FEATURE_HEIGHT, Feature = true } or nil
 				local cells = {}
 				if f.Type == "River" then
 					-- Речка поперёк биома, извилистая
@@ -2254,7 +2509,10 @@ for _, region in ipairs(regions) do
 						last += 1
 					end
 					local len = last - i + 1
-					local part = decor(box(featureFolder, spec.Kind, (i + len / 2) * B, floorTop, (j + 0.5) * B, len * B, 0.1, B, TOP_ONLY))
+					-- Объёмный блок со столкновением: по воде и берегам бегут сверху, а не проваливаются.
+					-- Высота небольшая, персонаж заходит на неё сам, как на ступеньку.
+					local part = box(featureFolder, spec.Kind, (i + len / 2) * B, floorTop, (j + 0.5) * B, len * B, spec.Height, B)
+					part.CastShadow = false
 					runs += 1
 					if spec.Glow and runs % 6 == 0 then
 						glow(part, 16, 1)
@@ -2308,7 +2566,8 @@ for _, region in ipairs(regions) do
 								last += 1
 							end
 							local len = last - i + 1
-							local part = decor(box(patchFolder, spec.Kind, (i + len / 2) * B, floorTop, (j + 0.5) * B, len * B, 0.1, B, TOP_ONLY))
+							local part = box(patchFolder, spec.Kind, (i + len / 2) * B, floorTop, (j + 0.5) * B, len * B, spec.Height or PATCH_HEIGHT, B)
+							part.CastShadow = false
 							if spec.Glow and not lit then
 								glow(part, 16, 1)
 								lit = true
@@ -2351,11 +2610,63 @@ for _, region in ipairs(regions) do
 				if not placedProp then
 					local plant = rollPlant(spec and spec.Plants or (not spec and theme.Plants) or nil)
 					if plant then
-						PLANTS[plant](plantFolder, u + rng:NextNumber(-1.2, 1.2), floorTop + (spec and 0.1 or 0), v + rng:NextNumber(-1.2, 1.2))
+						PLANTS[plant](plantFolder, u + rng:NextNumber(-1.2, 1.2), floorTop + (spec and (spec.Height or PATCH_HEIGHT) or 0), v + rng:NextNumber(-1.2, 1.2))
 					end
 				end
 			end
 		end
+	end
+
+	-- 3D-предметы по всему полу: деревья, стога, колодцы, кристаллы... Это «призраки»:
+	-- сквозь них пробегают, поэтому в погоне они не мешают. Не встают на речки и озёра,
+	-- возле точек яиц, ворот и босса, у края рядом с твёрдыми предметами.
+	if INSIDE and theme.Inside and next(theme.Inside) then
+		local insideFolder = folderOf(region.Name, "Inside")
+		local want = math.floor((u1 - u0) * (v1 - v0) / 1000 * INSIDE_DENSITY + 0.5)
+		local placed = {}
+		local made, attempts = 0, 0
+		while made < want and attempts < want * 25 do
+			attempts += 1
+			local name = pickWeighted(theme.Inside)
+			local r = INSIDE_FOOTPRINT[name] or 1
+			if region.I1 - region.I0 > 2 * r and region.J1 - region.J0 > 2 * r then
+				local i = rng:NextInteger(region.I0 + r, region.I1 - r)
+				local j = rng:NextInteger(region.J0 + r, region.J1 - r)
+				local ok = true
+				for di = -r, r do
+					for dj = -r, r do
+						local k = key(i + di, j + dj)
+						local spec = patchOf[k]
+						if clear[k] or edgeBlocked[k] or (spec and spec.Feature) then
+							ok = false
+						end
+					end
+				end
+				if ok then
+					for _, p in ipairs(placed) do
+						if math.max(math.abs(p[1] - i), math.abs(p[2] - j)) < INSIDE_GAP + math.max(r, p[3]) then
+							ok = false
+							break
+						end
+					end
+				end
+				if ok then
+					local spec = patchOf[key(i, j)]
+					local m = Instance.new("Model")
+					m.Name = name
+					m.Parent = insideFolder
+					PROPS[name]({
+						Parent = m, U = (i + 0.5) * B, V = (j + 0.5) * B,
+						Y = floorTop + (spec and (spec.Height or PATCH_HEIGHT) or 0),
+						Inward = i < (region.I0 + region.I1) / 2 and 1 or -1, Theme = theme,
+					})
+					ghost(m)
+					table.insert(placed, { i, j, r })
+					made += 1
+				end
+			end
+		end
+		insideCount += made
 	end
 end
 
@@ -2494,8 +2805,8 @@ if #createdBiomes > 0 then
 	print("[BlockWorld] Биомы, построенные скриптом: " .. table.concat(createdBiomes, ", ")
 		.. ". Если своей модели босса в биоме нет — игра ставит временного из кубиков.")
 end
-print(string.format("[BlockWorld] Деревьев %d, фонарей %d, построек %d, подсветок %d из %d, деталей всего %d, картинок Texture %d.",
-	treeCount, lanternCount, landmarkCount, lightsUsed, MAX_LIGHTS, partCount, textureCount))
+print(string.format("[BlockWorld] Деревьев %d, 3D-предметов в биомах %d, фонарей %d, построек %d, подсветок %d из %d, деталей всего %d, картинок Texture %d.",
+	treeCount, insideCount, lanternCount, landmarkCount, lightsUsed, MAX_LIGHTS, partCount, textureCount))
 
 -- Настройки места, от которых сильно зависит скорость
 local okTech, technology = pcall(function()

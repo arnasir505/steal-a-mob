@@ -556,13 +556,18 @@ local function onChatted(player, message)
 			print("Звуки:", table.concat((function()
 				local list = {}
 				for key, config in pairs(Sounds.List) do
-					table.insert(list, key .. (config.Id == 0 and "(нет Id)" or ""))
+					local note = ""
+					if config.Id == 0 then
+						note = Sounds.Resolve(key) and "(запасной " .. tostring(config.Fallback) .. ")" or "(нет Id)"
+					end
+					table.insert(list, key .. note)
 				end
 				table.sort(list)
 				return list
 			end)(), ", "))
 		else
-			print("Играю " .. name .. " (Id " .. Sounds.List[name].Id .. ")")
+			local resolved = Sounds.Resolve(name)
+			print("Играю " .. name .. " (" .. (resolved and resolved.SoundId or "нет Id") .. ")")
 			SfxService.PlayFor(player, name)
 			task.delay(1, function()
 				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
