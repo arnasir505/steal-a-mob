@@ -1,5 +1,5 @@
 # Проект игры — работа через VS Code, Rojo и Claude Code
-
+# dwadawadw
 ## Что тут лежит
 
 - `src/` — весь код игры.
