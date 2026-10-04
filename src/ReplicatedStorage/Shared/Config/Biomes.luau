@@ -10,8 +10,10 @@
 --                  берётся GameConfig.Weight.SpawnMaxWeight.
 -- Boss.Speed     — скорость босса в тех же единицах, что и стата игрока.
 --                  Чтобы убежать, эффективная скорость игрока должна быть >= этого числа.
--- Boss.Knockback — сила отталкивания: скорость толчка в студах в секунду
---                  (дальше биом — сильнее). Длительность толчка — GameConfig.Knockback
+--                  Это же число написано на табличке у босса ("Recommended").
+-- Boss.Knockback — сила отталкивания: скорость полёта в студах в секунду
+--                  (дальше биом — сильнее). 80 — ~40 студов, 1200 — ~2900 студов.
+--                  Высота и торможение — GameConfig.Knockback
 -- Boss.ModelName — имя модели босса. Положи её прямо в модель биома
 --                  (Workspace.Biomes.Plains.Farmer) — где стоит, там и спит.
 --                  Подробнее — в начале BossService.
@@ -38,8 +40,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Farmer",
 			ModelName = "Farmer",
-			Speed = 5,
-			Knockback = 60,
+			Speed = 1000,
+			Knockback = 80,
 			TurnDegrees = 0,
 		},
 	},
@@ -54,8 +56,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Lumberjack",
 			ModelName = "Lumberjack",
-			Speed = 30,
-			Knockback = 80,
+			Speed = 50000,
+			Knockback = 150,
 			TurnDegrees = 0,
 		},
 	},
@@ -70,8 +72,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Pharaoh",
 			ModelName = "Pharaoh",
-			Speed = 200,
-			Knockback = 100,
+			Speed = 200000,
+			Knockback = 250,
 			TurnDegrees = 0,
 		},
 	},
@@ -86,8 +88,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Yeti",
 			ModelName = "Yeti",
-			Speed = 1200,
-			Knockback = 120,
+			Speed = 1000000,
+			Knockback = 400,
 			TurnDegrees = 0,
 		},
 	},
@@ -102,8 +104,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Bog Hermit",
 			ModelName = "BogHermit",
-			Speed = 7500,
-			Knockback = 140,
+			Speed = 10000000,
+			Knockback = 600,
 			TurnDegrees = 0,
 		},
 	},
@@ -118,8 +120,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Inferno King",
 			ModelName = "InfernoKing",
-			Speed = 45000,
-			Knockback = 160,
+			Speed = 100000000,
+			Knockback = 850,
 			TurnDegrees = 0,
 		},
 	},
@@ -135,8 +137,8 @@ Biomes.List = {
 		Boss = {
 			DisplayName = "Gem Warden",
 			ModelName = "GemWarden",
-			Speed = 250000,
-			Knockback = 180,
+			Speed = 500000000,
+			Knockback = 1200,
 			TurnDegrees = 0,
 		},
 	},

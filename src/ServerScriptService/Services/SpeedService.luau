@@ -319,7 +319,9 @@ function SpeedService.Knockback(player, fromPosition, power)
 	if away.Magnitude < 0.1 then
 		away = Vector3.new(0, 0, 1)
 	end
-	local velocity = away.Unit * power + Vector3.new(0, power * K.UpShare, 0)
+	local up = math.min(power * K.UpShare, K.MaxUpSpeed)
+	local velocity = away.Unit * power + Vector3.new(0, up, 0)
+	local flight = SpeedService.KnockbackFlightTime(power)
 
 	-- Прошлый толчок убираем, чтобы толчки не складывались
 	local old = root:FindFirstChild("Knockback")
@@ -330,17 +332,50 @@ function SpeedService.Knockback(player, fromPosition, power)
 	attachment.Name = "Knockback"
 	attachment.Parent = root
 
+	-- 1. Разгон: короткий толчок вверх и в сторону. Сила большая, но не бесконечная —
+	-- с бесконечной персонажа могло протолкнуть сквозь стену.
+	local mass = math.max(root.AssemblyMass, 1)
 	local mover = Instance.new("LinearVelocity")
 	mover.Attachment0 = attachment
 	mover.RelativeTo = Enum.ActuatorRelativeTo.World
 	mover.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
 	mover.VectorVelocity = velocity
-	mover.MaxForce = math.huge
+	mover.MaxForce = mass * (power + up) * 30 + mass * workspace.Gravity
 	mover.Parent = attachment
 
 	-- Толчок быстрее обычного бега — проверка скорости не должна считать это читерством
-	SpeedService.AllowBurst(player, K.Time + 1.5)
-	Debris:AddItem(attachment, K.Time)
+	SpeedService.AllowBurst(player, flight + K.BrakeTime + 1.5)
+	Debris:AddItem(attachment, flight + K.BrakeTime)
+
+	-- 2. Полёт: дальше персонаж летит сам (дугой, без сопротивления воздуха).
+	-- 3. Торможение после приземления: гасим скорость по земле, иначе от сильного
+	-- толчка персонаж скользил бы ещё сотни студов.
+	task.delay(K.Time, function()
+		if attachment.Parent then
+			mover:Destroy()
+		end
+	end)
+	task.delay(flight, function()
+		if not attachment.Parent then
+			return -- уже новый толчок или персонаж пропал
+		end
+		local brake = Instance.new("LinearVelocity")
+		brake.Attachment0 = attachment
+		brake.RelativeTo = Enum.ActuatorRelativeTo.World
+		brake.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+		brake.PrimaryTangentAxis = Vector3.xAxis
+		brake.SecondaryTangentAxis = Vector3.zAxis
+		brake.PlaneVelocity = Vector2.zero
+		brake.MaxForce = mass * K.BrakeForce
+		brake.Parent = attachment
+	end)
+end
+
+-- Сколько секунд игрок летит от толчка силой power (разгон + дуга вверх и вниз).
+-- Столько же он должен лежать тряпичной куклой, иначе встанет прямо в воздухе.
+function SpeedService.KnockbackFlightTime(power)
+	local up = math.min(power * K.UpShare, K.MaxUpSpeed)
+	return K.Time + 2 * up / workspace.Gravity
 end
 
 local function checkMovement(player, deltaTime)

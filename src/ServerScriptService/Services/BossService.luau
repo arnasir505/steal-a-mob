@@ -82,6 +82,8 @@ local DISABLED_STATES = {
 local SfxService = require(script.Parent.SfxService)
 local BossModels = require(script.Parent.BossModels)
 local Sounds = require(ReplicatedStorage.Shared.Config.Sounds)
+local UIAssets = require(ReplicatedStorage.Shared.Config.UIAssets)
+local Format = require(ReplicatedStorage.Shared.Format)
 
 -- Разовые эффекты для клиентов (BossFx.client.luau): "Wake" — рык, "Hit" — удар.
 -- Что босс делает сейчас (сон, бег...), клиент читает из атрибута модели BossState.
@@ -753,8 +755,9 @@ local function catch(boss, player, root, now)
 	SfxService.PlayAt(root, "Caught")
 	SfxService.PlayAt(boss.Root, soundOf(boss, "Hit"))
 	fxEvent:FireAllClients(boss.Model, "Hit", player)
-	RagdollService.Ragdoll(player, C.RagdollTime)
-	SpeedService.Knockback(player, boss.Root.Position, boss.Config.Knockback or 60)
+	local power = boss.Config.Knockback or 60
+	RagdollService.Ragdoll(player, math.max(C.RagdollTime, SpeedService.KnockbackFlightTime(power) + 0.3))
+	SpeedService.Knockback(player, boss.Root.Position, power)
 	if takenEgg then
 		startCarry(boss, takenEgg, now)
 	else
@@ -854,6 +857,144 @@ end
 -- Запуск
 ---------------------------------------------------------------------
 
+---------------------------------------------------------------------
+-- Табличка у босса: какая скорость нужна, чтобы убежать с его яйцом
+---------------------------------------------------------------------
+
+local SIGN = {
+	Distance = 10,   -- на сколько студов от края босса в сторону входа в биом
+	Side = 8,        -- и на сколько вбок, чтобы не закрывать босса
+	PostHeight = 6,  -- высота столба
+	Board = Vector3.new(12, 7, 0.8), -- доска: ширина, высота, толщина
+	Wood = Color3.fromRGB(176, 136, 84),
+	DarkWood = Color3.fromRGB(110, 80, 48),
+}
+
+local signFolder
+
+local function signPart(name, size, cframe, color, parent)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.CFrame = cframe
+	part.Color = color
+	part.Material = Enum.Material.WoodPlanks
+	part.Anchored = true
+	-- Сквозь табличку пробегают, яйца и камера её не замечают
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Parent = parent
+	return part
+end
+
+-- Куда смотрит табличка: к воротам биома (оттуда приходят игроки)
+local function signFacing(biome, boss, from)
+	local parts = biome.GateParts or {}
+	if #parts > 0 then
+		local sum = Vector3.zero
+		for _, part in ipairs(parts) do
+			sum += part.Position
+		end
+		local toGate = sum / #parts - from
+		toGate = Vector3.new(toGate.X, 0, toGate.Z)
+		if toGate.Magnitude > 1 then
+			return toGate.Unit
+		end
+	end
+	local look = boss and boss.Root and boss.Root.CFrame.LookVector or Vector3.new(0, 0, -1)
+	return Vector3.new(look.X, 0, look.Z).Unit
+end
+
+local function makeSign(biome, boss)
+	if not signFolder then
+		signFolder = Instance.new("Folder")
+		signFolder.Name = "BossSigns"
+		signFolder.Parent = workspace
+	end
+	local old = signFolder:FindFirstChild(biome.Id)
+	if old then
+		old:Destroy()
+	end
+
+	local bed = boss.BedPosition
+	local facing = signFacing(biome, boss, bed)
+	local side = facing:Cross(Vector3.yAxis)
+	local spot = bed + facing * (boss.FootRadius + SIGN.Distance) + side * (boss.FootRadius + SIGN.Side)
+	local ground = WorldService.FindGround(Vector3.new(spot.X, bed.Y + 20, spot.Z), { bossFolder }, 80)
+	local base = ground or Vector3.new(spot.X, bed.Y - boss.Root.Size.Y / 2 - boss.Humanoid.HipHeight, spot.Z)
+	-- Доска смотрит лицом (Front) к воротам
+	local frame = CFrame.lookAt(base, base + facing)
+
+	local model = Instance.new("Model")
+	model.Name = biome.Id
+	local board = SIGN.Board
+	signPart("Post", Vector3.new(0.9, SIGN.PostHeight + 1, 0.9), frame * CFrame.new(0, (SIGN.PostHeight + 1) / 2, 0), SIGN.DarkWood, model)
+	local boardCFrame = frame * CFrame.new(0, SIGN.PostHeight + board.Y / 2, 0)
+	local plate = signPart("Board", board, boardCFrame, SIGN.Wood, model)
+	-- Тёмная рамка по краю доски
+	signPart("FrameTop", Vector3.new(board.X + 0.4, 0.5, board.Z + 0.2), boardCFrame * CFrame.new(0, board.Y / 2, 0), SIGN.DarkWood, model)
+	signPart("FrameBottom", Vector3.new(board.X + 0.4, 0.5, board.Z + 0.2), boardCFrame * CFrame.new(0, -board.Y / 2, 0), SIGN.DarkWood, model)
+	for _, s in ipairs({ -1, 1 }) do
+		signPart("FrameSide", Vector3.new(0.5, board.Y + 0.4, board.Z + 0.2), boardCFrame * CFrame.new(s * board.X / 2, 0, 0), SIGN.DarkWood, model)
+	end
+	model.PrimaryPart = plate
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.LightInfluence = 0.2
+	gui.MaxDistance = 400
+	gui.Parent = plate
+
+	-- Верхняя строка: значок скорости (обувь) слева и число справа.
+	-- Доска 12x7 студов: значок — квадрат по высоте строки, число занимает остальное.
+	local iconImage = UIAssets.Images.icon_speed
+	local hasIcon = iconImage ~= nil and iconImage ~= ""
+	local rowTop, rowHeight = 0.07, 0.6
+	local iconWidth = hasIcon and rowHeight * board.Y / board.X or 0 -- ширина квадрата в долях доски
+	if hasIcon then
+		local icon = Instance.new("ImageLabel")
+		icon.BackgroundTransparency = 1
+		icon.Position = UDim2.fromScale(0.04, rowTop)
+		icon.Size = UDim2.fromScale(iconWidth, rowHeight)
+		icon.Image = iconImage
+		icon.ScaleType = Enum.ScaleType.Fit
+		icon.Parent = gui
+	end
+
+	local number = Instance.new("TextLabel")
+	number.BackgroundTransparency = 1
+	number.Position = UDim2.fromScale(0.04 + iconWidth + 0.02, rowTop + 0.04)
+	number.Size = UDim2.fromScale(0.92 - iconWidth - 0.02, rowHeight - 0.08)
+	number.Font = Enum.Font.FredokaOne
+	number.TextScaled = true
+	number.Text = Format.Number(boss.Config.Speed or 1)
+	number.TextColor3 = Color3.fromRGB(255, 255, 255)
+	number.Parent = gui
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 7
+	stroke.Color = Color3.fromRGB(40, 26, 14)
+	stroke.Parent = number
+
+	local caption = Instance.new("TextLabel")
+	caption.BackgroundTransparency = 1
+	caption.Position = UDim2.fromScale(0.05, 0.68)
+	caption.Size = UDim2.fromScale(0.9, 0.24)
+	caption.Font = Enum.Font.FredokaOne
+	caption.TextScaled = true
+	caption.Text = "RECOMMENDED"
+	caption.TextColor3 = Color3.fromRGB(255, 225, 90)
+	caption.Parent = gui
+	local captionStroke = Instance.new("UIStroke")
+	captionStroke.Thickness = 4
+	captionStroke.Color = Color3.fromRGB(40, 26, 14)
+	captionStroke.Parent = caption
+
+	model.Parent = signFolder
+end
+
 local function setupBoss(biome)
 	if not biome or not biome.Model then
 		warn("[BossService] Биом без модели в Workspace: пропускаю босса."
@@ -913,6 +1054,11 @@ local function setupBoss(biome)
 	end
 	sleep(boss)
 	table.insert(bosses, boss)
+
+	local ok, err = pcall(makeSign, biome, boss)
+	if not ok then
+		warn("[BossService] Не удалось поставить табличку у " .. name .. ": " .. tostring(err))
+	end
 end
 
 -- Все боссы на место и спать (новый раунд, тестовая команда)

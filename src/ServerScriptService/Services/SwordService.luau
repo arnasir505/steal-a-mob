@@ -237,7 +237,7 @@ local function hit(attacker, attackerRoot, victim, victimRoot, config, tool)
 		Remotes.Notify(victim, "Egg knocked out!", attacker.DisplayName .. " hit you.")
 	end
 	-- Как у босса: сначала роняем, потом толкаем — игрок улетает уже обмякшим
-	RagdollService.Ragdoll(victim, C.RagdollTime)
+	RagdollService.Ragdoll(victim, math.max(C.RagdollTime, SpeedService.KnockbackFlightTime(config.Knockback) + 0.3))
 	SpeedService.Knockback(victim, attackerRoot.Position, config.Knockback)
 end
 
